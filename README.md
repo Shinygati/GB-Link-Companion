@@ -50,18 +50,9 @@ A ROM hack moves the game's data around, so the second screen has to be told whe
 - With a hack, the RNG screen is hidden (the RNG may work differently), and Wonder Cards aren't offered (they're made for the original ROMs). The Wild Pokémon, Trainer, Map and Encounter tracker screens work.
 - Shinygati's [pokeemeraldQoL](https://github.com/Shinygati/pokeemeraldQoL) and [pokefireredQoL](https://github.com/Shinygati/pokefireredQoL) (v1.1), built from their `master` branches, are recognised without a `.sym`. Newer builds need one like any other hack.
 
-<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/a956b784-de69-47d7-a644-038d1a4714a1" />
-<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/7077186e-aac4-4f5d-b936-84b9e4696ab8" />
-<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/71e85133-4fa4-4f23-b3cb-2feb82e99cca" />
-<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/ad630bc8-3deb-45d4-8627-4deffa235c1a" />
-<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/fafefa10-c3ea-4181-a1d4-8940f4db084f" />
-<img width="500" height="666" alt="Untitled" src="https://github.com/user-attachments/assets/76fbd8e9-0400-4284-bb60-e6a5b2bfd558" />
-
-
-
-
-
-
+<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/a956b784-de69-47d7-a644-038d1a4714a1" /> <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/7077186e-aac4-4f5d-b936-84b9e4696ab8" />
+<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/71e85133-4fa4-4f23-b3cb-2feb82e99cca" /> <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/ad630bc8-3deb-45d4-8627-4deffa235c1a" />
+<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/fafefa10-c3ea-4181-a1d4-8940f4db084f" /> <img width="500" height="666" alt="Untitled" src="https://github.com/user-attachments/assets/76fbd8e9-0400-4284-bb60-e6a5b2bfd558" />
 
 ### Wonder Cards (Emerald, FireRed, LeafGreen)
 While you play, **Wonder Cards…** lists every card from the GB-Link team's [gblink-wondercards](https://github.com/GB-Link/gblink-wondercards) for your game. That includes the event distributions (Aurora, Mystic and Eon Tickets, Wish Eggs and more), Project Wonder's cards and the GB-Link Team's own cards.
