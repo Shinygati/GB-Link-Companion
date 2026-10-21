@@ -50,6 +50,10 @@ A ROM hack moves the game's data around, so the second screen has to be told whe
 - With a hack, the RNG screen is hidden (the RNG may work differently), and Wonder Cards aren't offered (they're made for the original ROMs). The Wild Pokémon, Trainer, Map and Encounter tracker screens work.
 - Shinygati's [pokeemeraldQoL](https://github.com/Shinygati/pokeemeraldQoL) and [pokefireredQoL](https://github.com/Shinygati/pokefireredQoL) (v1.1), built from their `master` branches, are recognised without a `.sym`. Newer builds need one like any other hack.
 
+<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/a956b784-de69-47d7-a644-038d1a4714a1" /> <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/7077186e-aac4-4f5d-b936-84b9e4696ab8" />
+<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/71e85133-4fa4-4f23-b3cb-2feb82e99cca" /> <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/ad630bc8-3deb-45d4-8627-4deffa235c1a" />
+<img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/fafefa10-c3ea-4181-a1d4-8940f4db084f" /> <img width="500" height="666" alt="Untitled" src="https://github.com/user-attachments/assets/76fbd8e9-0400-4284-bb60-e6a5b2bfd558" />
+
 ### Wonder Cards (Emerald, FireRed, LeafGreen)
 While you play, **Wonder Cards…** lists every card from the GB-Link team's [gblink-wondercards](https://github.com/GB-Link/gblink-wondercards) for your game. That includes the event distributions (Aurora, Mystic and Eon Tickets, Wish Eggs and more), Project Wonder's cards and the GB-Link Team's own cards.
 
@@ -80,7 +84,7 @@ Wonder Cards only work with the original English games, checked against No-Intro
 3. Switch the GBA on while holding **START + SELECT**.
 4. Play and save as usual. When you're done, close mGBA, and your save is copied to the cartridge.
 
-`gblink-sync-native/README.md` has the full guide.
+`gblink-companion-native/README.md` has the full guide.
 
 ---
 
@@ -89,25 +93,25 @@ Wonder Cards only work with the original English games, checked against No-Intro
 The app is written in Go with the [Gio](https://gioui.org) UI toolkit. You need Go 1.24 or newer:
 
 ```
-cd gblink-sync-native
+cd gblink-companion-native
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H windowsgui" -o GBLinkCompanion.exe .
 ```
 
 In PowerShell, set the variables first: `$env:GOOS="windows"; $env:GOARCH="amd64"; $env:CGO_ENABLED="0"`.
 
-The GBA helper program and the mGBA script are built into the app from `gblink-sync-native/assets/`, so you only need the following step if you change the GBA side. Build the helper in `b2s/gba` with devkitARM (or `arm-none-eabi-gcc`) and `gbafix` on your PATH, then copy it into the app's assets:
+The GBA helper program and the mGBA script are built into the app from `gblink-companion-native/assets/`, so you only need the following step if you change the GBA side. Build the helper in `b2s/gba` with devkitARM (or `arm-none-eabi-gcc`) and `gbafix` on your PATH, then copy it into the app's assets:
 
 ```
 make -C b2s/gba
-cp b2s/gba/gblink_sync_mb.gba gblink-sync-native/assets/
+cp b2s/gba/gblink_sync_mb.gba gblink-companion-native/assets/
 ```
 
 ## What's in this repository
 
 | Folder | What it is |
 |---|---|
-| `gblink-sync-native/` | The app: the window, the GB-Link connection, save syncing, backups, status screens, Wonder Cards. `assets/` holds the GBA helper, the mGBA script (`gblink_controller.lua`) and the Wonder Cards |
-| `gblink-sync-native/test/` | End-to-end tests: the real app against a simulated GB-Link and GBA, and libmgba running the real script |
+| `gblink-companion-native/` | The app: the window, the GB-Link connection, save syncing, backups, status screens, Wonder Cards. `assets/` holds the GBA helper, the mGBA script (`gblink_controller.lua`) and the Wonder Cards |
+| `gblink-companion-native/test/` | End-to-end tests: the real app against a simulated GB-Link and GBA, and libmgba running the real script |
 | `b2s/` | The GBA side, based on Burn2Slot: the program that runs on the GBA (link protocol, save and ROM reading, save writing, status screens), a PC simulator of it, and tools |
 
 ---
@@ -133,6 +137,6 @@ GB-Link Companion is free software, licensed under the **GNU General Public Lice
 
 It includes work under other licences, all compatible with the GPL-3.0:
 
-- the GB-Link team's Wonder Cards: GPL-3.0, `gblink-sync-native/assets/wondercards/LICENSE-gblink-wondercards`
+- the GB-Link team's Wonder Cards: GPL-3.0, `gblink-companion-native/assets/wondercards/LICENSE-gblink-wondercards`
 - Burn2Slot by vrodin: MIT, `b2s/LICENSE-Burn2Slot`
 - Spleen by Frederic Cambus: BSD-2-Clause, `b2s/LICENSE-Spleen`
