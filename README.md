@@ -80,7 +80,7 @@ Wonder Cards only work with the original English games, checked against No-Intro
 3. Switch the GBA on while holding **START + SELECT**.
 4. Play and save as usual. When you're done, close mGBA, and your save is copied to the cartridge.
 
-`gblink-sync-native/README.md` has the full guide.
+`gblink-companion-native/README.md` has the full guide.
 
 ---
 
@@ -89,25 +89,25 @@ Wonder Cards only work with the original English games, checked against No-Intro
 The app is written in Go with the [Gio](https://gioui.org) UI toolkit. You need Go 1.24 or newer:
 
 ```
-cd gblink-sync-native
+cd gblink-companion-native
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H windowsgui" -o GBLinkCompanion.exe .
 ```
 
 In PowerShell, set the variables first: `$env:GOOS="windows"; $env:GOARCH="amd64"; $env:CGO_ENABLED="0"`.
 
-The GBA helper program and the mGBA script are built into the app from `gblink-sync-native/assets/`, so you only need the following step if you change the GBA side. Build the helper in `b2s/gba` with devkitARM (or `arm-none-eabi-gcc`) and `gbafix` on your PATH, then copy it into the app's assets:
+The GBA helper program and the mGBA script are built into the app from `gblink-companion-native/assets/`, so you only need the following step if you change the GBA side. Build the helper in `b2s/gba` with devkitARM (or `arm-none-eabi-gcc`) and `gbafix` on your PATH, then copy it into the app's assets:
 
 ```
 make -C b2s/gba
-cp b2s/gba/gblink_sync_mb.gba gblink-sync-native/assets/
+cp b2s/gba/gblink_sync_mb.gba gblink-companion-native/assets/
 ```
 
 ## What's in this repository
 
 | Folder | What it is |
 |---|---|
-| `gblink-sync-native/` | The app: the window, the GB-Link connection, save syncing, backups, status screens, Wonder Cards. `assets/` holds the GBA helper, the mGBA script (`gblink_controller.lua`) and the Wonder Cards |
-| `gblink-sync-native/test/` | End-to-end tests: the real app against a simulated GB-Link and GBA, and libmgba running the real script |
+| `gblink-companion-native/` | The app: the window, the GB-Link connection, save syncing, backups, status screens, Wonder Cards. `assets/` holds the GBA helper, the mGBA script (`gblink_controller.lua`) and the Wonder Cards |
+| `gblink-companion-native/test/` | End-to-end tests: the real app against a simulated GB-Link and GBA, and libmgba running the real script |
 | `b2s/` | The GBA side, based on Burn2Slot: the program that runs on the GBA (link protocol, save and ROM reading, save writing, status screens), a PC simulator of it, and tools |
 
 ---
@@ -133,6 +133,6 @@ GB-Link Companion is free software, licensed under the **GNU General Public Lice
 
 It includes work under other licences, all compatible with the GPL-3.0:
 
-- the GB-Link team's Wonder Cards: GPL-3.0, `gblink-sync-native/assets/wondercards/LICENSE-gblink-wondercards`
+- the GB-Link team's Wonder Cards: GPL-3.0, `gblink-companion-native/assets/wondercards/LICENSE-gblink-wondercards`
 - Burn2Slot by vrodin: MIT, `b2s/LICENSE-Burn2Slot`
 - Spleen by Frederic Cambus: BSD-2-Clause, `b2s/LICENSE-Spleen`
