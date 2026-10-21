@@ -1,0 +1,6 @@
+*.o
+*.elf
+gba/burn2slot_mb.gba
+sim/sim
+test/mgba_link
+test/boot_shot

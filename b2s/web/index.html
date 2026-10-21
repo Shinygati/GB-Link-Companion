@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Burn2Slot for GB-Link</title>
+    <link rel="icon" href="favicon.ico">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="app">
+        <div class="header-row">
+            <h1>Burn2Slot for GB-Link</h1>
+            <button id="btn-dark-mode" class="dark-mode-btn" title="Toggle Dark Mode">🌙</button>
+        </div>
+
+        <div class="columns">
+            <div class="col col-steps">
+        <div class="card">
+            <div class="card-header">
+                <h2>1. Connect</h2>
+                <p class="cable-note">Game Boy Color link cable required</p>
+            </div>
+            <div class="button-row">
+                <div class="usb-button-group">
+                    <button id="btn-connect">Connect USB</button>
+                    <div class="usb-status-box">
+                        <span id="usb-status" class="status disconnected">Disconnected</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>2. Start the flasher on the GBA</h2>
+            </div>
+            <ol class="steps">
+                <li>With the GBA <strong>off</strong>, put the bootleg (repro) cart in the GBA and connect the link cable.</li>
+                <li>Press <strong>Send flasher</strong>, then turn the GBA on while <strong>holding START + SELECT</strong>
+                    (this skips the cart and waits for the link cable).</li>
+                <li>The GBA shows "Burn2Slot for GB-Link" and the flash chip is detected.</li>
+            </ol>
+            <div class="button-row">
+                <button id="btn-multiboot" disabled>Send flasher</button>
+                <button id="btn-detect" class="btn-secondary" disabled title="Use this if the flasher is already running on the GBA">Already running? Detect</button>
+            </div>
+            <div id="chip-info" class="chip-info"></div>
+        </div>
+
+            </div>
+            <div class="col col-save">
+        <div class="card">
+            <div class="card-header">
+                <h2>Back up / restore a save</h2>
+                <p class="cable-note">Official carts and repros</p>
+            </div>
+            <p class="section-note">Start the flasher on the GBA with the game cart inserted (step 2: hold START + SELECT while
+                switching on), then detect the save chip.</p>
+            <div class="button-row">
+                <button id="btn-save-detect" disabled>Detect save</button>
+                <select id="save-type" class="save-select" disabled>
+                    <option value="0">Save type: auto</option>
+                    <option value="1">SRAM / FRAM 32 KB</option>
+                    <option value="2">SRAM 64 KB</option>
+                    <option value="3">Flash 64 KB</option>
+                    <option value="4">Flash 128 KB</option>
+                    <option value="5">EEPROM 512 B</option>
+                    <option value="6">EEPROM 8 KB</option>
+                </select>
+            </div>
+            <div id="save-info" class="chip-info"></div>
+            <div class="button-row" style="margin-top: 14px;">
+                <button id="btn-save-backup" disabled>Back up save (.sav)</button>
+                <button id="btn-save-restore" class="btn-secondary" disabled>Restore save from .sav…</button>
+                <input type="file" id="save-file-input" accept=".sav,.srm,.bin,.fla,.eep" hidden>
+            </div>
+            <div id="save-progress-wrap" class="progress-wrap">
+                <div class="progress-label"><span id="save-progress-phase">Reading</span><span id="save-progress-text">0%</span></div>
+                <div class="progress"><div id="save-progress-fill" class="progress-fill"></div></div>
+            </div>
+            <p class="warning-note">Restoring replaces the save on the cart. Back up first if you might want it again.</p>
+        </div>
+
+            </div>
+            <div class="col col-flash">
+        <div class="card">
+            <div class="card-header">
+                <h2>3. Flash a ROM</h2>
+            </div>
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-zone-content">
+                    <span class="drop-icon">📁</span>
+                    <p>Drag &amp; drop a .gba file here</p>
+                    <p class="drop-subtext">or click to select</p>
+                </div>
+                <input type="file" id="file-input" accept=".gba,.bin" hidden>
+            </div>
+            <div id="file-info" class="file-info" style="display: none;">
+                <span id="file-name">No file selected</span>
+                <span id="file-size"></span>
+                <button id="btn-clear-file" class="btn-small">✕ Clear</button>
+            </div>
+            <div class="button-row" style="margin-top: 14px;">
+                <button id="btn-flash" disabled>Flash to cart</button>
+                <button id="btn-cancel" class="btn-secondary" style="display: none;">Cancel</button>
+            </div>
+            <div id="progress-wrap" class="progress-wrap">
+                <div class="progress-label"><span id="progress-phase">Erasing</span><span id="progress-text">0%</span></div>
+                <div class="progress"><div id="progress-fill" class="progress-fill"></div></div>
+            </div>
+            <p class="warning-note">⚠️ This erases and overwrites the bootleg cart (including its save on carts that keep it in flash).
+                Don't unplug anything until it says Done.</p>
+        </div>
+
+            </div>
+            <div class="col col-mb">
+        <div class="card">
+            <div class="card-header">
+                <h2>Send a multiboot ROM</h2>
+                <p class="cable-note">Optional - any multiboot game or tool (max 256 KB)</p>
+            </div>
+            <div id="mb-drop-zone" class="drop-zone">
+                <div class="drop-zone-content">
+                    <span class="drop-icon">📁</span>
+                    <p>Drag &amp; drop a .gba, .bin or .mb file here</p>
+                    <p class="drop-subtext">or click to select</p>
+                </div>
+                <input type="file" id="mb-file-input" accept=".gba,.bin,.mb" hidden>
+            </div>
+            <div id="mb-file-info" class="file-info" style="display: none;">
+                <span id="mb-file-name">No file selected</span>
+                <span id="mb-file-size"></span>
+                <button id="mb-btn-clear" class="btn-small">✕ Clear</button>
+            </div>
+            <div class="button-row" style="margin-top: 14px;">
+                <button id="btn-send-mb" disabled>Send Multiboot</button>
+            </div>
+            <p class="warning-note">Turn the GBA on with no cart inserted (or hold START + SELECT) after pressing Send Multiboot.</p>
+        </div>
+
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Log</h2>
+            </div>
+            <div id="log-container"></div>
+        </div>
+
+        <div id="browser-warning" class="browser-warning">
+            ⚠️ <strong>Browser Not Supported:</strong> needs WebUSB (Chrome/Edge) or WebSerial (Chrome/Edge/Firefox 151+).
+        </div>
+        <footer class="footer">
+            <p>Version: 1.0.0 — flashing code from <a href="https://github.com/vrodin/Burn2Slot" target="_blank">Burn2Slot</a> by vrodin,
+                connection code from <a href="https://github.com/GB-Link/gba-multiboot-web" target="_blank">GB-Link Multiboot Web</a></p>
+            <p>Requires <a href="https://github.com/GB-Link/GBLink-Firmware" target="_blank">GB-Link firmware</a></p>
+        </footer>
+    </div>
+    <script src="usb_connection.js"></script>
+    <script src="serial_connection.js"></script>
+    <script src="multiboot.js"></script>
+    <script src="burn2slot_mb.js"></script>
+    <script src="burn2slot.js"></script>
+    <script src="app.js"></script>
+    <script src="launcher-return.js"></script>
+</body>
+
+</html>
