@@ -19,7 +19,7 @@ open(dat, 'w').write('<?xml version="1.0"?><datafile><header><name>Nintendo - Ga
                      f'<game name="My Homebrew (World)"><rom name="My Homebrew (World).gba" size="1024" crc="00000000" sha1="{hashlib.sha1(h).hexdigest()}"/></game></datafile>')
 home = os.path.join(tmp, 'home'); os.makedirs(home)
 open(os.path.join(home, 'settings.json'), 'w').write(json.dumps({'mgba': '/bin/true', 'gamesFolder': games, 'setupDone': True}))
-env = dict(os.environ, GBLINK_PORT='/dev/null', GBLINK_SYNC_HOME=home, GBLINK_TEST_HOOKS='47980', LIBGL_ALWAYS_SOFTWARE='1',
+env = dict(os.environ, GBLINK_PORT='/dev/null', GBLINK_COMPANION_HOME=home, GBLINK_TEST_HOOKS='47980', LIBGL_ALWAYS_SOFTWARE='1',
            GBLINK_MULTI='1', GBLINK_TEST_PICK=dat)
 app = subprocess.Popen([APP], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=tmp)
 for _ in range(100):

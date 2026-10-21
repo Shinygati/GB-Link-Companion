@@ -167,6 +167,7 @@ type Window struct {
 	btn                 map[string]*widget.Clickable
 	setCtl, setAsk      widget.Bool
 	setSeed             widget.Bool
+	setClock            widget.Bool
 	settingsOpen        bool
 	wcOpen              bool   // the Wonder Cards list (wcgui.go)
 	wcSel               string // the card whose description is open
@@ -257,7 +258,8 @@ func (w *Window) loop() {
 				os.Exit(0)
 			}
 			// a game is still running or the save is being written: keep going in the
-			// background; the window comes back if it's needed (ui.Raise)
+			// background; the window comes back if it's needed (ui.Raise). Before that, stop.
+			a.closeWhileBusy()
 			return
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
@@ -663,6 +665,13 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 	if w.setSeed.Update(gtx) {
 		v := w.setSeed.Value
 		go a.setSettings(func(s *Settings) { s.KeepEmeraldSeed = !v })
+	}
+	if w.setClock.Update(gtx) {
+		v := w.setClock.Value
+		go a.setSettings(func(s *Settings) { s.PCClock = !v })
+	}
+	if !w.setClock.Pressed() {
+		w.setClock.Value = !w.st.Settings.PCClock
 	}
 	if !w.setSeed.Pressed() {
 		w.setSeed.Value = !w.st.Settings.KeepEmeraldSeed
@@ -1808,6 +1817,8 @@ func (w *Window) settingsDialog(gtx C) {
 						div,
 						row("Use the GBA as a controller", "The GBA's buttons control the game in mGBA while you play. Its menu (hold SELECT) also shows Pokémon RNG, wild and trainer info, and the map.", "", sw(&w.setCtl)),
 						div,
+						row("Use the cartridge's clock", "Pokémon Ruby, Sapphire and Emerald: mGBA's clock starts from your cartridge's clock, so berries, tides and daily events carry on the same when you go back to the GBA. Turn it off to use this PC's clock.", "", sw(&w.setClock)),
+						div,
 						row("Fix Emerald's starting seed", "Pokémon Emerald has a bug: its RNG starts from the same seed every time. With this on, the game gets a random seed when it starts in mGBA, the way it was meant to. Turn it off if your RNG manipulation relies on the old seed.", "", sw(&w.setSeed)),
 						div,
 						row("Ask me straight away", "If you save while the GBA is off, ask to switch it on right then, instead of when mGBA closes.", "", sw(&w.setAsk)),
@@ -1832,7 +1843,7 @@ func (w *Window) settingsDialog(gtx C) {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx C) D { return w.label(gtx, 19, font.SemiBold, w.pal.text, "Settings") }),
 					layout.Flexed(1, func(gtx C) D { // scrolls when the window is short
-						return material.List(w.th, &w.setList).Layout(gtx, 1, func(gtx C, _ int) D { return rows(gtx) })
+						return w.setList.List.Layout(gtx, 1, func(gtx C, _ int) D { return rows(gtx) }) // scrolls, no scroll bar
 					}),
 					layout.Rigid(func(gtx C) D {
 						return layout.Inset{Top: 8}.Layout(gtx, func(gtx C) D {

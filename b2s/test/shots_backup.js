@@ -1,4 +1,4 @@
-// The GBA's screens during a cartridge backup (gba/gblink_sync_mb.gba in mGBA, with a test cart),
+// The GBA's screens during a cartridge backup (gba/gblink_companion_mb.gba in mGBA, with a test cart),
 // saved as PPM files: copying, cancelled, copying the save, finished.
 //   node test/shots_backup.js OUTDIR
 const { spawn } = require('child_process');
@@ -9,7 +9,7 @@ const romPath = path.join(os.tmpdir(), 'b2s_shot_cart.gba');
 const rom = Buffer.alloc(2 << 20, 0x5A);
 rom.writeUInt32LE(0x51AEFF24, 4); rom.write('POKEMON RUBY', 0xA0, 'latin1'); rom.write('AXVE', 0xAC, 'latin1');
 fs.writeFileSync(romPath, rom);
-const emu = spawn(path.join(__dirname, 'mgba_link'), [path.join(__dirname, '../gba/gblink_sync_mb.gba'), '60'],
+const emu = spawn(path.join(__dirname, 'mgba_link'), [path.join(__dirname, '../gba/gblink_companion_mb.gba'), '60'],
                   { stdio: ['pipe', 'pipe', 'ignore', 'pipe'], env: { ...process.env, MGBA_CART: romPath } });
 let buf = Buffer.alloc(0), waiter = null;
 emu.stdout.on('data', d => { buf = Buffer.concat([buf, d]); if (waiter) { const w = waiter; waiter = null; w(); } });

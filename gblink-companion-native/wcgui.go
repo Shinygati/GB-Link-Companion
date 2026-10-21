@@ -67,7 +67,7 @@ func (w *Window) wcClicks(gtx C) {
 		a.ui.update(func(st *State) { st.WCStatus, st.WCReplace = "Sending…", nil })
 		go a.useWonderCards(picked)
 	}
-	if w.b("wc-add").Clicked(gtx) && len(picked) == 1 {
+	if w.b("wc-add").Clicked(gtx) && len(picked) == 1 && !wcJapanese(w.st.WCGame) {
 		c := picked[0]
 		a.ui.update(func(st *State) { st.WCStatus = "Sending " + c.Label + "…" })
 		go a.addWonderCard(c)
@@ -87,6 +87,9 @@ func (w *Window) wcCard(gtx C) D {
 		text = "Waiting for mGBA's script (it sends the cards to the game)."
 	default:
 		text, can = "Send any of the GB-Link team's Wonder Cards to the game while you play: add one for the deliveryman to hand over, or use one straight away.", true
+		if wcJapanese(st.WCGame) {
+			text = "Send any of the GB-Link team's Wonder Cards to the game while you play: their gifts or effects happen straight away."
+		}
 	}
 	return layout.Inset{Top: 18}.Layout(gtx, func(gtx C) D {
 		return w.card(gtx, func(gtx C) D {
@@ -149,7 +152,7 @@ func (w *Window) wcDialog(gtx C) {
 									"Cards marked “until reset” keep running until the game is reset; only one of them can run at a time, so ticking one unticks the other, and using one while another is on offers to replace it. "+
 									"Your ticks are remembered for this game. "+
 									"Receive Wondercard: the card is saved like a Mystery Gift card, for the deliveryman on any Pokémon Center's 2F (save in the game to keep it). "+
-									"Cards from github.com/GB-Link/gblink-wondercards (GPL-3.0).")
+									"Cards from github.com/GB-Link/gblink-wondercards (GPL-3.0), made for your game and its language."+japaneseNote(st.WCGame))
 						})
 					}),
 					layout.Rigid(func(gtx C) D {
@@ -250,7 +253,7 @@ func (w *Window) wcDialog(gtx C) {
 								}),
 								layout.Rigid(gap(10)),
 								layout.Rigid(func(gtx C) D {
-									if n != 1 {
+									if n != 1 || wcJapanese(st.WCGame) { // the Japanese games: use now only
 										return D{}
 									}
 									return w.button(gtx, w.b("wc-add"), "secondary", "Receive Wondercard", false, nil)
@@ -264,4 +267,11 @@ func (w *Window) wcDialog(gtx C) {
 			return dialog(gtx)
 		})
 	})
+}
+
+func japaneseNote(key string) string {
+	if wcJapanese(key) {
+		return " The Japanese games can only use a card now: Receive Wondercard isn't offered for them."
+	}
+	return ""
 }

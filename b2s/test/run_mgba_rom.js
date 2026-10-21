@@ -11,7 +11,7 @@ for (let i = 0; i < rom.length; i++) rom[i] = (i * 2654435761 >>> 13) & 0xFF;
 rom.writeUInt32LE(0x51AEFF24, 4);                         // start of the Nintendo logo
 rom.write('DUMPTEST    ', 0xA0, 'latin1'); rom.write('BDMP', 0xAC, 'latin1');
 fs.writeFileSync(romPath, rom);
-const bin = process.argv[2] || path.join(__dirname, '../gba/gblink_sync_mb.gba');
+const bin = process.argv[2] || path.join(__dirname, '../gba/gblink_companion_mb.gba');
 // SIM=1: run the helper's C code natively in the simulator instead (link loss and misaligned
 // re-syncs included), with the same ROM in its cart.
 const emu = process.env.SIM

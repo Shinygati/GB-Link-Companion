@@ -1,0 +1,303 @@
+"""The status screens' and the GBA helper's text in the games' languages.
+
+Writes gblink-companion-native/assets/lang.json: {"lua": {...}, "app": {...}, "gba": {...}}, each
+English text -> [French, German, Italian, Spanish, Japanese]. The Japanese is kana only (the
+GBA's fonts have kana, ASCII and no kanji). Checks the Japanese only uses characters the fonts have
+and that each fits where it's shown.
+Usage (in b2s/): python3 tools/mklang.py [out.json]"""
+import json, sys, unicodedata
+
+LUA = {
+ "neutral": ["neutre", "neutral", "neutra", "neutra", "へんかなし"],
+ "Asleep": ["Endormi", "Schläft", "Addormentato", "Dormido", "ねむり"],
+ "Poisoned": ["Empoisonné", "Vergiftet", "Avvelenato", "Envenenado", "どく"],
+ "Burned": ["Brûlé", "Verbrannt", "Scottato", "Quemado", "やけど"],
+ "Frozen": ["Gelé", "Gefroren", "Congelato", "Congelado", "こおり"],
+ "Paralyzed": ["Paralysé", "Paralysiert", "Paralizzato", "Paralizado", "まひ"],
+ "OK": ["OK", "OK", "OK", "OK", "げんき"],
+ "RNG STATE": ["ÉTAT DU RNG", "RNG-STATUS", "STATO RNG", "ESTADO RNG", "RNG じょうたい"],
+ "Not shown for this build.": ["Non affiché pour cette version.", "Für diesen Build nicht angezeigt.",
+                               "Non mostrato per questa build.", "No se muestra en esta versión.",
+                               "この ビルドでは でない"],
+ "Current seed": ["Seed actuelle", "Aktueller Seed", "Seed attuale", "Seed actual", "いまの シード"],
+ "Initial seed": ["Seed initiale", "Start-Seed", "Seed iniziale", "Seed inicial", "しょき シード"],
+ "Advances": ["Avancées", "Fortschritte", "Avanzamenti", "Avances", "すすんだ かず"],
+ "finding it...": ["recherche...", "wird gesucht...", "ricerca...", "buscando...", "さがしちゅう..."],
+ "unknown (seeded too long": ["inconnue (fixée bien", "unbekannt (lange vor", "ignota (impostata molto",
+                              "desconocida (fijada", "ふめい (スクリプトより"],
+ "before this script started)": ["avant le script)", "dem Skriptstart gesetzt)", "prima dello script)",
+                                 "mucho antes del script)", "まえに きまった)"],
+ "since the script started": ["depuis le script", "seit Skriptstart", "dall'avvio", "desde el script",
+                              "スクリプトから"],
+ "Next shiny": ["Proch. chroma", "Nächstes Shiny", "Pross. shiny", "Próximo shiny", "つぎ いろちがい"],
+ "in": ["dans", "in", "tra", "en", "あと"],
+ "searching...": ["recherche...", "wird gesucht...", "ricerca...", "buscando...", "さがしちゅう..."],
+ "load a save first": ["chargez une sauvegarde", "erst Spielstand laden", "carica un salvataggio",
+                       "carga una partida", "セーブを よみこんでね"],
+ "Last frame": ["Dernière frame", "Letzter Frame", "Ultimo frame", "Último frame", "まえの フレーム"],
+ "Per frame": ["Par frame", "Pro Frame", "Per frame", "Por frame", "1フレームごと"],
+ "(last second)": ["(dernière seconde)", "(letzte Sekunde)", "(ultimo secondo)", "(último segundo)",
+                   "(この 1びょう)"],
+ "Frames": ["Frames", "Frames", "Frame", "Frames", "フレーム"],
+ "(game's counter)": ["(compteur du jeu)", "(Zähler des Spiels)", "(contatore del gioco)",
+                      "(contador del juego)", "(ゲームの カウンタ)"],
+ "Seed set by GB-Link Companion": ["Seed fixée par GB-Link Companion", "Seed von GB-Link Companion gesetzt",
+                                   "Seed impostato da GB-Link Companion", "Seed fijada por GB-Link Companion",
+                                   "シードは GB-Link Companionが きめた"],
+ "Frames count the advances from the seed.": ["Les frames comptent depuis la seed.", "Frames zählen ab dem Seed.",
+                                              "I frame si contano dal seed.", "Los frames cuentan desde la seed.",
+                                              "フレームは シードから かぞえる"],
+ "HP": ["PV", "KP", "PS", "PS", "HP"],
+ "Atk": ["Atq", "Ang", "Att", "Ata", "A"],
+ "Def": ["Déf", "Ver", "Dif", "Def", "B"],
+ "SpA": ["ASp", "SAn", "ASp", "AEs", "C"],
+ "SpD": ["DSp", "SVe", "DSp", "DEs", "D"],
+ "Spe": ["Vit", "Ini", "Vel", "Vel", "S"],
+ "SHINY": ["CHROMA", "SHINY", "SHINY", "SHINY", "いろちがい"],
+ "Frame": ["Frame", "Frame", "Frame", "Frame", "フレーム"],
+ "(the advance it was made on)": ["(son avancée)", "(sein Advance)", "(il suo avanzamento)", "(su avance)",
+                                  "(うまれた フレーム)"],
+ "Frame: not found (made too long ago)": ["Frame : introuvable (trop ancienne)", "Frame: nicht gefunden (zu alt)",
+                                          "Frame: non trovato (troppo vecchio)", "Frame: no encontrado (muy antiguo)",
+                                          "フレーム: みつからない (ふるすぎる)"],
+ "Frame: finding it...": ["Frame : recherche...", "Frame: wird gesucht...", "Frame: ricerca...",
+                          "Frame: buscando...", "フレーム: さがしちゅう..."],
+ "WILD POKEMON": ["POKÉMON SAUVAGE", "WILDES POKÉMON", "POKÉMON SELVATICO", "POKÉMON SALVAJE", "やせいの ポケモン"],
+ "No wild Pokemon yet.": ["Aucun Pokémon sauvage pour l'instant.", "Noch kein wildes Pokémon.",
+                          "Ancora nessun Pokémon selvatico.", "Aún no hay Pokémon salvajes.",
+                          "まだ やせいの ポケモンが いない"],
+ "It shows here as soon as one appears.": ["Il s'affiche ici dès qu'il apparaît.", "Es erscheint hier, sobald es auftaucht.",
+                                           "Appare qui appena ne compare uno.", "Aparece aquí en cuanto salga uno.",
+                                           "でてきたら ここに でるよ"],
+ "SAFARI POKEMON": ["POKÉMON SAFARI", "SAFARI-POKÉMON", "POKÉMON SAFARI", "POKÉMON SAFARI", "サファリの ポケモン"],
+ "In battle": ["En combat", "Im Kampf", "In lotta", "En combate", "バトルちゅう"],
+ "Last one seen (not in battle now)": ["Le dernier vu (pas en combat)", "Zuletzt gesehen (nicht im Kampf)",
+                                       "L'ultimo visto (non in lotta)", "El último visto (no en combate)",
+                                       "さいごに みた ポケモン"],
+ "Catch rate": ["Taux de capture", "Fangrate", "Tasso cattura", "Ratio captura", "つかまえやすさ"],
+ "right now": ["maintenant", "jetzt", "ora", "ahora", "いま"],
+ "sure catch": ["capture sûre", "sicherer Fang", "cattura certa", "captura segura", "かならず つかまる"],
+ "Poke": ["Poké", "Poké", "Poké", "Poké", "モンス"],
+ "Great": ["Super", "Super", "Mega", "Super", "スーパ"],
+ "Ultra": ["Hyper", "Hyper", "Ultra", "Ultra", "ハイパ"],
+ "Chance of a catch per throw, right now": ["Chance de capture par lancer (actuelle)", "Fangchance pro Wurf, gerade jetzt",
+                                            "Probabilità di cattura per lancio, ora", "Probabilidad de captura por tiro, ahora",
+                                            "1かい なげて つかまる かくりつ"],
+ "In the Safari Zone": ["Dans le Parc Safari", "In der Safari-Zone", "Nella Zona Safari", "En la Zona Safari",
+                        "サファリゾーン"],
+ "Safari Ball": ["Safari Ball", "Safariball", "Safari Ball", "Safari Ball", "サファリボール"],
+ "catch factor": ["facteur capture", "Fangfaktor", "fattore cattura", "factor captura", "けいすう"],
+ "Flee chance": ["Fuite", "Fluchtchance", "Fuga", "Huida", "にげる かくりつ"],
+ "each turn": ["par tour", "pro Runde", "a turno", "por turno", "まいターン"],
+ "factor": ["facteur", "Faktor", "fattore", "factor", "けいすう"],
+ "turns left": ["tours restants", "Runden übrig", "turni rimasti", "turnos restantes", "ターン のこり"],
+ "none": ["aucun", "keiner", "nessuno", "ninguno", "なし"],
+ "Rock:": ["Caillou :", "Stein:", "Sasso:", "Roca:", "いし:"],
+ "Bait:": ["Appât :", "Köder:", "Esca:", "Cebo:", "えさ:"],
+ "Went near": ["Approché", "Genähert", "Avvicinato", "Acercado", "ちかづいた"],
+ "times": ["fois", "Mal", "volte", "veces", "かい"],
+ "Pokeblocks thrown": ["Pokéblocs lancés", "Pokériegel geworfen", "Pokémelle lanciate", "Pokécubos lanzados",
+                       "ポロック なげた"],
+ "TRAINER'S TEAM": ["ÉQUIPE DU DRESSEUR", "TEAM DES TRAINERS", "SQUADRA ALLENATORE", "EQUIPO DEL ENTRENADOR",
+                    "トレーナーの てもち"],
+ "No trainer battle yet.": ["Pas encore de combat de dresseur.", "Noch kein Trainerkampf.",
+                            "Ancora nessuna lotta con allenatori.", "Aún no hay combates con entrenadores.",
+                            "まだ トレーナーと たたかっていない"],
+ "The whole team shows here, including": ["Toute l'équipe s'affiche ici, même les", "Das ganze Team erscheint hier, auch",
+                                          "Qui appare tutta la squadra, anche i", "Aquí sale todo el equipo, incluso los",
+                                          "てもちが ぜんぶ でるよ"],
+ "Pokemon that haven't been sent out.": ["Pokémon qui ne sont pas encore sortis.", "Pokémon, die noch nicht kämpften.",
+                                         "Pokémon non ancora mandati in campo.", "Pokémon que aún no han salido.",
+                                         "まだ だしていない ポケモンも"],
+ "Pokemon": ["Pokémon", "Pokémon", "Pokémon", "Pokémon", "ひき"],
+ "(last trainer battle)": ["(dernier combat de dresseur)", "(letzter Trainerkampf)", "(ultima lotta con allenatore)",
+                           "(último combate con entrenador)", "(さいごの トレーナーせん)"],
+ "fainted": ["K.O.", "besiegt", "esausto", "debilitado", "ひんし"],
+ "OUT": ["EN JEU", "AKTIV", "IN CAMPO", "ACTIVO", "でている"],
+ "Trainers:": ["Dresseurs :", "Trainer:", "Allenatori:", "Entrenadores:", "トレーナー:"],
+ "Items:": ["Objets :", "Items:", "Strumenti:", "Objetos:", "どうぐ:"],
+ "MAP": ["CARTE", "KARTE", "MAPPA", "MAPA", "マップ"],
+ "Nothing here": ["Rien ici", "Hier ist nichts", "Niente qui", "Aquí no hay nada", "なにも ない"],
+ "Somewhere unnamed": ["Lieu sans nom", "Ort ohne Namen", "Luogo senza nome", "Lugar sin nombre", "なまえの ない ばしょ"],
+ "No picture for this place": ["Pas d'image pour ce lieu", "Kein Bild für diesen Ort", "Nessuna immagine del luogo",
+                               "No hay imagen de este lugar", "この ばしょの えは ない"],
+ "Couldn't read the game:": ["Lecture du jeu impossible :", "Spiel nicht lesbar:", "Impossibile leggere il gioco:",
+                             "No se pudo leer el juego:", "ゲームが よめない:"],
+ "town": ["bourg", "Stadt", "città", "pueblo", "まち"],
+ "city": ["ville", "Stadt", "città", "ciudad", "まち"],
+ "route": ["route", "Route", "percorso", "ruta", "どうろ"],
+ "underground": ["souterrain", "unterirdisch", "sotterraneo", "subterráneo", "ちか"],
+ "underwater": ["sous l'eau", "unter Wasser", "sott'acqua", "bajo el agua", "すいちゅう"],
+ "indoors": ["intérieur", "drinnen", "al chiuso", "interior", "おくない"],
+ "secret base": ["base secrète", "Geheimbasis", "base segreta", "base secreta", "ひみつきち"],
+ "HOENN": ["HOENN", "HOENN", "HOENN", "HOENN", "ホウエン"],
+ "KANTO": ["KANTO", "KANTO", "KANTO", "KANTO", "カントー"],
+ "ONE-THREE ISLAND": ["ÎLES 1-3", "EILAND 1-3", "ISOLE 1-3", "ISLAS 1-3", "1-3のしま"],
+ "FOUR-FIVE ISLAND": ["ÎLES 4-5", "EILAND 4-5", "ISOLE 4-5", "ISLAS 4-5", "4-5のしま"],
+ "SIX-SEVEN ISLAND": ["ÎLES 6-7", "EILAND 6-7", "ISOLE 6-7", "ISLAS 6-7", "6-7のしま"],
+}
+
+# GB-Link Companion's own text on the status screens (status.go)
+APP = {
+ "Use GBA as controller": ["GBA comme manette", "GBA als Controller", "GBA come controller", "GBA como mando",
+                           "GBAを コントローラーに"],
+ "RNG state": ["État du RNG", "RNG-Status", "Stato RNG", "Estado RNG", "RNGの じょうたい"],
+ "Wild Pokemon": ["Pokémon sauvage", "Wildes Pokémon", "Pokémon selvatico", "Pokémon salvaje", "やせいの ポケモン"],
+ "Trainer's team": ["Équipe du dresseur", "Team des Trainers", "Squadra allenatore", "Equipo del entrenador",
+                    "トレーナーの てもち"],
+ "Map location": ["Position sur la carte", "Ort auf der Karte", "Posizione sulla mappa", "Posición en el mapa",
+                  "マップの いばしょ"],
+ "Encounter tracker": ["Compteur de rencontres", "Begegnungszähler", "Contatore incontri", "Contador de encuentros",
+                       "であった かず"],
+ "GB-LINK STATUS": ["ÉTAT GB-LINK", "GB-LINK-STATUS", "STATO GB-LINK", "ESTADO GB-LINK", "GB-LINK じょうほう"],
+ "mGBA's script isn't connected yet.": ["Le script de mGBA n'est pas connecté.", "mGBAs Skript ist nicht verbunden.",
+                                        "Lo script di mGBA non è collegato.", "El script de mGBA no está conectado.",
+                                        "mGBAの スクリプトが つながっていない"],
+ "Up/Down + A: choose. In a screen: B back": ["Haut/Bas + A : choisir. B : retour", "Hoch/Runter + A: wählen. B: zurück",
+                                              "Su/Giù + A: scegli. B: indietro", "Arriba/Abajo + A: elegir. B: volver",
+                                              "うえ/した + A: えらぶ  B: もどる"],
+ "Controller: hold SELECT for the menu": ["Manette : SELECT maintenu = menu", "Controller: SELECT halten = Menü",
+                                          "Controller: tieni SELECT per il menu", "Mando: mantén SELECT para el menú",
+                                          "SELECTを ながおしで メニュー"],
+ "ENCOUNTER TRACKER": ["COMPTEUR DE RENCONTRES", "BEGEGNUNGSZÄHLER", "CONTATORE INCONTRI", "CONTADOR DE ENCUENTROS",
+                       "であった かず"],
+ "Encounters": ["Rencontres", "Begegnungen", "Incontri", "Encuentros", "であった かず"],
+ "Counting every wild Pokemon": ["Chaque Pokémon sauvage est compté", "Zähle jedes wilde Pokémon",
+                                 "Conto ogni Pokémon selvatico", "Contando cada Pokémon salvaje",
+                                 "やせいの ポケモンを かぞえちゅう"],
+ "Not counting - START to begin": ["Pas de comptage - START pour lancer", "Zählt nicht - START zum Starten",
+                                   "Non conta - START per iniziare", "Sin contar - START para empezar",
+                                   "かぞえていない - STARTで スタート"],
+ "This session": ["Cette session", "Diese Sitzung", "Questa sessione", "Esta sesión", "こんかい"],
+ "No wild Pokemon yet": ["Aucun Pokémon sauvage", "Noch kein wildes Pokémon", "Ancora nessun Pokémon",
+                         "Aún no hay Pokémon", "まだ いない"],
+ "Last": ["Dernier", "Zuletzt", "Ultimo", "Último", "さいご"],
+ "SHINY!": ["CHROMA !", "SHINY!", "SHINY!", "¡SHINY!", "いろちがい!"],
+ "Set the count:": ["Nouveau total :", "Zahl setzen:", "Imposta conto:", "Fijar cuenta:", "かずを きめる:"],
+ "<>: digit  ^v: change  A: set  B: cancel": ["<>: chiffre ^v: changer A: OK B: non", "<>: Ziffer ^v: ändern A: OK B: Abbruch",
+                                              "<>: cifra ^v: cambia A: OK B: annulla", "<>: cifra ^v: cambiar A: OK B: cancelar",
+                                              "<>: けた ^v: かえる A: OK B: やめる"],
+ "START: count on/off   A: set the count": ["START : compter oui/non  A : régler", "START: Zählen an/aus  A: Zahl setzen",
+                                             "START: conta sì/no  A: imposta", "START: contar sí/no  A: fijar cuenta",
+                                             "START: かぞえる/やめる A: かずを きめる"],
+ "Playing in mGBA - hold SELECT to stop": ["Jeu sur mGBA - SELECT maintenu: stop", "Spiel in mGBA - SELECT halten: Stopp",
+                                           "Gioco su mGBA - tieni SELECT: stop", "Juego en mGBA - mantén SELECT: parar",
+                                           "mGBAで プレイちゅう - SELECTで やめる"],
+ "B:menu  <>:screens  hold SELECT:play": ["B:menu <>:écrans SELECT long:jouer", "B:Menü <>:Seiten SELECT lang:spielen",
+                                          "B:menu <>:pagine SELECT lungo:gioca", "B:menú <>:pantallas SELECT largo:jugar",
+                                          "B:メニュー <>:がめん SELECTで プレイ"],
+ "B:menu ^v:scroll  hold SELECT:play": ["B:menu ^v:défiler SELECT long:jouer", "B:Menü ^v:scrollen SELECT lang:spielen",
+                                        "B:menu ^v:scorri SELECT lungo:gioca", "B:menú ^v:mover SELECT largo:jugar",
+                                        "B:もどる ^v:うごかす SELECTで プレイ"],
+ "See the GB-Link Companion window.": ["Voir la fenêtre de GB-Link Companion.", "Siehe Fenster von GB-Link Companion.",
+                                       "Vedi la finestra di GB-Link Companion.", "Mira la ventana de GB-Link Companion.",
+                                       "GB-Link Companionの ウィンドウを みてね"],
+ "Waiting for mGBA...": ["En attente de mGBA...", "Warte auf mGBA...", "In attesa di mGBA...", "Esperando a mGBA...",
+                         "mGBAを まっています..."],
+ "B: menu": ["B : menu", "B: Menü", "B: menu", "B: menú", "B: メニュー"],
+ "B:back": ["B:retour", "B:zurück", "B:indietro", "B:volver", "B:もどる"],
+ "A:pick B:back": ["A:choisir B:retour", "A:wählen B:zurück", "A:scegli B:indietro", "A:elegir B:volver", "A:えらぶ B:もどる"],
+ "A:look": ["A:voir", "A:schauen", "A:guarda", "A:mirar", "A:みる"],
+ "playing": ["en jeu", "spielt", "in gioco", "jugando", "プレイちゅう"],
+ "RNG STATE": LUA["RNG STATE"], "WILD POKEMON": LUA["WILD POKEMON"], "TRAINER'S TEAM": LUA["TRAINER'S TEAM"],
+ "MAP LOCATION": ["POSITION SUR LA CARTE", "ORT AUF DER KARTE", "POSIZIONE SULLA MAPPA", "POSICIÓN EN EL MAPA",
+                  "マップの いばしょ"],
+}
+
+# the GBA helper's own screen (b2s/gba/main.c, 8x12 font, 29 columns)
+GBA = {
+ "GB-Link Companion for mGBA": ["GB-Link Companion pour mGBA", "GB-Link Companion für mGBA", "GB-Link Companion per mGBA",
+                                "GB-Link Companion para mGBA", "mGBAようの GB-Link Companion"],
+ "Playing in mGBA on your PC": ["Partie dans mGBA sur le PC", "Spiel läuft in mGBA am PC", "Si gioca su mGBA nel PC",
+                                "Jugando en mGBA en tu PC", "PCの mGBAで プレイちゅう"],
+ "Keep the link cable in.": ["Laissez le câble branché.", "Linkkabel nicht abziehen.", "Lascia il cavo collegato.",
+                             "Deja el cable conectado.", "ケーブルを ぬかないでね"],
+ "Don't switch off mid-save.": ["Ne pas éteindre en sauvant.", "Beim Speichern nicht aus.", "Non spegnere mentre salva.",
+                                "No apagues al guardar.", "セーブちゅうは きらないでね"],
+ "Waiting for the PC...": ["En attente du PC...", "Warte auf den PC...", "In attesa del PC...", "Esperando al PC...",
+                           "PCを まっています..."],
+ "Connected to the PC": ["Connecté au PC", "Mit dem PC verbunden", "Collegato al PC", "Conectado al PC", "PCに つながった"],
+ "Cartridge found": ["Cartouche trouvée", "Modul gefunden", "Cartuccia trovata", "Cartucho encontrado", "カートリッジ OK"],
+ "Loading save into mGBA...": ["Sauvegarde vers mGBA...", "Lade Spielstand in mGBA...", "Carico il salvataggio...",
+                               "Cargando partida en mGBA...", "セーブを mGBAに よみこみちゅう..."],
+ "Save loaded into mGBA": ["Sauvegarde chargée", "Spielstand in mGBA geladen", "Salvataggio caricato",
+                           "Partida cargada en mGBA", "セーブを よみこんだ"],
+ "Saving to the cart...": ["Écriture sur la cartouche...", "Speichere aufs Modul...", "Salvo sulla cartuccia...",
+                           "Guardando en el cartucho...", "カートリッジに セーブちゅう..."],
+ "Save written to the cart": ["Sauvegarde écrite", "Aufs Modul gespeichert", "Salvato sulla cartuccia",
+                              "Guardado en el cartucho", "カートリッジに セーブした"],
+ "Load": ["Charge", "Laden", "Carica", "Carga", "よみこみ"],
+ "Save": ["Sauve", "Sich.", "Salva", "Guarda", "セーブ"],
+ "Copy": ["Copie", "Kopie", "Copia", "Copia", "コピー"],
+ "Copying the game to the PC...": ["Copie du jeu vers le PC...", "Kopiere Spiel auf den PC...", "Copio il gioco sul PC...",
+                                   "Copiando el juego al PC...", "ゲームを PCに コピーちゅう..."],
+ "Game copied to the PC": ["Jeu copié sur le PC", "Spiel auf PC kopiert", "Gioco copiato sul PC", "Juego copiado al PC",
+                           "ゲームを コピーした"],
+ "Checking the cartridge...": ["Vérification cartouche...", "Prüfe das Modul...", "Controllo cartuccia...",
+                               "Revisando el cartucho...", "カートリッジを しらべちゅう..."],
+ "Copying the save to the PC...": ["Copie de la sauvegarde...", "Kopiere Spielstand...", "Copio il salvataggio...",
+                                   "Copiando la partida...", "セーブを PCに コピーちゅう..."],
+ "Save copied to the PC": ["Sauvegarde copiée", "Spielstand kopiert", "Salvataggio copiato", "Partida copiada al PC",
+                           "セーブを コピーした"],
+ "No cartridge found": ["Aucune cartouche", "Kein Modul gefunden", "Nessuna cartuccia", "No hay cartucho",
+                        "カートリッジが ない"],
+ "Backing up a cartridge": ["Sauvegarde d'une cartouche", "Modul wird gesichert", "Backup di una cartuccia",
+                            "Copia de un cartucho", "カートリッジの バックアップ"],
+ "Game:": ["Jeu :", "Spiel:", "Gioco:", "Juego:", "ゲーム:"],
+ "Size:": ["Taille", "Größe:", "Dim.:", "Tamaño", "サイズ:"],
+ "Hold SELECT for the menu": ["SELECT maintenu : menu", "SELECT halten: Menü", "Tieni SELECT per il menu",
+                              "Mantén SELECT: menú", "SELECTを ながおしで メニュー"],
+ "GBA buttons control mGBA": ["La GBA contrôle mGBA", "GBA-Tasten steuern mGBA", "I tasti GBA guidano mGBA",
+                              "La GBA controla mGBA", "GBAの ボタンで mGBAを そうさ"],
+ "Nothing was saved.": ["Rien n'a été copié.", "Nichts wurde gesichert.", "Nulla è stato salvato.", "No se guardó nada.",
+                        "なにも ほぞん していない"],
+ "Backup stopped": ["Sauvegarde arrêtée", "Sicherung gestoppt", "Backup interrotto", "Copia detenida",
+                    "バックアップを やめた"],
+ "You can switch the GBA off.": ["Vous pouvez éteindre la GBA.", "Du kannst den GBA ausmachen.", "Puoi spegnere il GBA.",
+                                 "Puedes apagar la GBA.", "GBAの でんげんを きってOK"],
+ "Backup finished": ["Sauvegarde terminée", "Sicherung fertig", "Backup completato", "Copia terminada",
+                     "バックアップ かんりょう"],
+ "mGBA closed": ["mGBA fermé", "mGBA geschlossen", "mGBA chiuso", "mGBA cerrado", "mGBAを とじた"],
+}
+
+# the kana the GBA's fonts have: the games' Japanese charset 0x01-0xA0, and the long vowel mark
+KANA = ("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
+        "ぁぃぅぇぉゃゅょがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽっ"
+        "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン"
+        "ァィゥェォャュョガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポッ" "ー")
+assert len(KANA) == 161, len(KANA)
+
+LABELS = {"Current seed", "Initial seed", "Advances", "Next shiny", "Last frame", "Per frame", "Frames",
+          "Encounters", "This session", "Set the count:"}
+TITLES = {"RNG STATE", "WILD POKEMON", "SAFARI POKEMON", "TRAINER'S TEAM", "MAP LOCATION", "ENCOUNTER TRACKER", "GB-LINK STATUS"}
+
+def width(s, kana_w):
+    return sum(kana_w if c in KANA else 1 for c in s)
+
+def check():
+    bad = 0
+    for name, table, kana_w, limit in (("lua", LUA, 2, None), ("app", APP, 2, None), ("gba", GBA, 1, 29)):
+        for en, tr in table.items():
+            assert len(tr) == 5, en
+            for i, t in enumerate(tr):
+                for c in t:
+                    if i == 4 and not (c in KANA or 0x20 <= ord(c) < 0x7F):
+                        print(f"{name}: {en!r}: Japanese has {c!r}, which the fonts don't"); bad += 1
+                    if i < 4 and not (0x20 <= ord(c) < 0x7F or 0xA0 <= ord(c) <= 0xFF):
+                        print(f"{name}: {en!r}: {c!r} isn't Latin-1"); bad += 1
+                w = width(t, kana_w)
+                lim = limit or 39
+                if name != "gba" and en in LABELS: lim = 15
+                if name != "gba" and en in TITLES: lim = 22
+                if limit and en in ("Load", "Save", "Copy"): lim = 6
+                if limit and en in ("Game:", "Size:"): lim = 6
+                if w > lim:
+                    print(f"{name}: {en!r} -> {t!r} is {w} wide (max {lim})"); bad += 1
+    return bad
+
+if __name__ == "__main__":
+    n = check()
+    out = sys.argv[1] if len(sys.argv) > 1 else "../gblink-companion-native/assets/lang.json"
+    json.dump({"langs": ["F", "D", "I", "S", "J"], "kana": KANA, "lua": LUA, "app": APP, "gba": GBA},
+              open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print(f"wrote {out}; {n} problems")

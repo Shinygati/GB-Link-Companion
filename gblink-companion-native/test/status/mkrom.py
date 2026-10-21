@@ -370,7 +370,7 @@ else:
 # ---- header and program
 prog = open(os.path.join(HERE, 'rom.bin'), 'rb').read()   # built from rom.s
 rom[0:len(prog)] = prog
-logo = open(os.path.join(HERE, '../../assets/gblink_sync_mb.gba'), 'rb').read()[4:0xA0]
+logo = open(os.path.join(HERE, '../../assets/gblink_companion_mb.gba'), 'rb').read()[4:0xA0]
 rom[4:0xA0] = logo
 rom[0xA0:0xAC] = b'POKEMON TEST'
 rom[0x500:0x50C] = b'FLASH1M_V103'      # the save library tag: mGBA gives the cart a 128 KB flash chip

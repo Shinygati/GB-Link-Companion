@@ -1,5 +1,5 @@
 # Builds burn2slot_mb.gba (multiboot image, <256 KB) with a plain arm-none-eabi toolchain, and
-# gblink_sync_mb.gba: the same program with the screens of the mGBA save-sync launcher (-DSYNC_UI).
+# gblink_companion_mb.gba: the same program with the screens of GB-Link Companion (-DCOMPANION_UI).
 # (devkitARM also works: make PREFIX=$DEVKITARM/bin/arm-none-eabi-).
 PREFIX  ?= arm-none-eabi-
 CC      := $(PREFIX)gcc
@@ -9,20 +9,20 @@ CFLAGS  := -mcpu=arm7tdmi -mthumb -mthumb-interwork -O2 -Wall -Wextra -ffreestan
 LDFLAGS := -nostdlib -nostartfiles -T gba.ld -Wl,--no-warn-rwx-segments
 SRC     := main.c flash.c save.c sio_gba.c ui.c libc.c status.c
 OBJ     := $(SRC:.c=.o) crt0.o
-SYNC_OBJ := main_sync.o $(filter-out main.o,$(OBJ))
+COMPANION_OBJ := main_companion.o $(filter-out main.o,$(OBJ))
 
-all: burn2slot_mb.gba gblink_sync_mb.gba
+all: burn2slot_mb.gba gblink_companion_mb.gba
 
-gblink_sync_mb.gba: gblink_sync_mb.elf
+gblink_companion_mb.gba: gblink_companion_mb.elf
 	$(OBJCOPY) -O binary $< $@
-	$(GBAFIX) $@ -p -tGBLINKSYNC -cGBLS -m01
+	$(GBAFIX) $@ -p -tGBLINKCOMP -cGBLC -m01
 	@python3 -c "import os,sys; n=os.path.getsize('$@'); print('size', n); sys.exit(n > 0x40000)"
 
-gblink_sync_mb.elf: $(SYNC_OBJ) gba.ld
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SYNC_OBJ) -lgcc
+gblink_companion_mb.elf: $(COMPANION_OBJ) gba.ld
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(COMPANION_OBJ) -lgcc
 
-main_sync.o: main.c *.h
-	$(CC) $(CFLAGS) -DSYNC_UI -c $< -o $@
+main_companion.o: main.c *.h
+	$(CC) $(CFLAGS) -DCOMPANION_UI -c $< -o $@
 
 burn2slot_mb.gba: burn2slot_mb.elf
 	$(OBJCOPY) -O binary $< $@

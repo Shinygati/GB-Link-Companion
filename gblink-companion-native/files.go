@@ -13,7 +13,7 @@ import (
 )
 
 func configDir() string {
-	if d := os.Getenv("GBLINK_SYNC_HOME"); d != "" { // for tests
+	if d := os.Getenv("GBLINK_COMPANION_HOME"); d != "" { // for tests
 		os.MkdirAll(d, 0o755)
 		return d
 	}
@@ -21,7 +21,10 @@ func configDir() string {
 	if err != nil {
 		base = "."
 	}
-	d := filepath.Join(base, "GBLinkSaveSync")
+	d := filepath.Join(base, "GBLinkCompanion")
+	if _, err := os.Stat(d); os.IsNotExist(err) { // settings from before the rename: move them over
+		os.Rename(filepath.Join(base, "GBLinkSaveSync"), d)
+	}
 	os.MkdirAll(d, 0o755)
 	return d
 }
@@ -38,6 +41,9 @@ type Settings struct {
 	// Pokémon Emerald (the original game) always starts its RNG at seed 0; mGBA's script gives it
 	// a random one when it starts, unless this is set (some RNG manipulation relies on seed 0)
 	KeepEmeraldSeed bool `json:"keepEmeraldSeed"`
+	// Pokémon Ruby, Sapphire and Emerald: mGBA's clock follows the PC, not the cartridge's clock
+	// (on by default: mGBA starts from the cartridge's clock, see cartclock.go)
+	PCClock bool `json:"pcClock"`
 }
 
 func loadSettings() Settings {
@@ -152,6 +158,9 @@ func (g *Game) localSave() []byte {
 	return b
 }
 
+// backup keeps a copy of a save in the ROM's folder (gblink_backups/<game>/), named by when and
+// why: "cart" (read from the cartridge), "mgba" (saved in mGBA), "pc-before-load". The newest 30
+// of each kind are kept (100 of the saves made in mGBA).
 func (g *Game) backup(data []byte, tag string) {
 	os.MkdirAll(g.Backup, 0o755)
 	name := time.Now().Format("20060102-150405") + "-" + tag + ".sav"
@@ -159,26 +168,30 @@ func (g *Game) backup(data []byte, tag string) {
 	entries, _ := os.ReadDir(g.Backup)
 	var names []string
 	for _, e := range entries {
-		names = append(names, e.Name())
+		if strings.HasSuffix(e.Name(), "-"+tag+".sav") {
+			names = append(names, e.Name())
+		}
 	}
 	sort.Strings(names)
-	for len(names) > 30 { // keep the newest 30
+	keep := 30
+	if tag == "mgba" {
+		keep = 100
+	}
+	for len(names) > keep {
 		os.Remove(filepath.Join(g.Backup, names[0]))
 		names = names[1:]
 	}
 }
 
-// writeLocal puts the cart's save into mGBA's .sav, keeping any extra data mGBA adds after the
-// save (e.g. clock data), and backing up a different PC save first.
+// writeLocal puts the cart's save into mGBA's .sav, backing up a different PC save first. Only the
+// save: clock data mGBA added after it goes (cartclock.go puts the cartridge's clock there when
+// the game has one).
 func (g *Game) writeLocal(save []byte) error {
 	old := g.localSave()
 	if old != nil && !bytesPrefixEqual(old, save) {
 		g.backup(old, "pc-before-load")
 	}
 	data := append([]byte(nil), save...)
-	if len(old) > len(save) && len(old)-len(save) <= 0x200 {
-		data = append(data, old[len(save):]...)
-	}
 	tmp := g.Sav + ".tmp"
 	var last error
 	for attempt := 0; attempt < 12; attempt++ {

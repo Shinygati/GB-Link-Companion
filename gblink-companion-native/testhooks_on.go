@@ -15,6 +15,10 @@ import (
 )
 
 func startTestHooks(a *App) {
+	if l := os.Getenv("GBLINK_TEST_LANG"); l != "" { // the GBA's text in this language, whatever the game
+		testLang = l[0]
+	}
+	testFind = os.Getenv("GBLINK_TEST_FIND") != ""
 	port := os.Getenv("GBLINK_TEST_HOOKS")
 	if port == "" {
 		return

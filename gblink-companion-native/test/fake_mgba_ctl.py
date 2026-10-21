@@ -29,6 +29,8 @@ while time.time() < end:
         sav = os.path.splitext(args[-1])[0] + '.sav'
         d = bytearray(open(sav, 'rb').read())
         for i in (range(0, len(d), 1000) if os.environ.get('FAKE_SAVE_ALL') else (100,)): d[i] ^= 0xFF
+        if os.environ.get('FAKE_RTC_FOOTER') and len(d) % 256 == 0:   # mGBA's clock data after the save
+            d += bytes(16)
         open(sav, 'wb').write(d)
         log('saved')
     if s is None:

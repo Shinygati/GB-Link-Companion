@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <mgba/core/core.h>
+#include <mgba/internal/gba/cart/gpio.h>
 #include <mgba/core/config.h>
 #include <mgba/internal/arm/arm.h>
 #include <mgba/internal/gba/gba.h>
@@ -70,6 +71,11 @@ int main(int argc, char **argv)
     if (getenv("MGBA_CART")) {                    /* a game cartridge in the slot, for ROM dumps */
         struct VFile *cv = VFileOpen(getenv("MGBA_CART"), O_RDONLY);   /* (inserted after boot, so */
         if (!cv || !GBALoadROM(gba, cv)) { fprintf(stderr, "cart load failed\n"); return 1; }  /* the BIOS runs the helper) */
+        if (getenv("MGBA_CART_RTC")) {            /* the cart has a clock (Pokemon RSE), stopped at this Unix time */
+            GBAHardwareInitRTC(&gba->memory.hw);
+            core->rtc.override = RTC_FIXED;
+            core->rtc.value = strtoll(getenv("MGBA_CART_RTC"), NULL, 10) * 1000LL;
+        }
     }
 
     long lost = 0, words = 0; int xlog = 0;

@@ -24,7 +24,7 @@ save = bytes(rnd.getrandbits(8) for _ in range(0x20000)); open(cart, 'wb').write
 gba = FakeGBLink(cart, 'flash128', log=lambda m: None)
 home = os.path.join(tmp, 'home'); os.makedirs(home)
 open(os.path.join(home, 'settings.json'), 'w').write(json.dumps({'mgba': '/bin/true', 'controller': True, 'gamesFolder': games, 'setupDone': True}))
-env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_SYNC_HOME=home, GBLINK_TEST_HOOKS='47960',
+env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_COMPANION_HOME=home, GBLINK_TEST_HOOKS='47960',
            LIBGL_ALWAYS_SOFTWARE='1', GBLINK_MULTI='1')
 app = subprocess.Popen([APP], env=env, stdout=open(os.path.join(tmp, 'app.log'), 'w'), stderr=subprocess.STDOUT, cwd=tmp)
 import atexit; atexit.register(lambda: app.poll() is None and app.kill())

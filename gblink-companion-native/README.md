@@ -132,7 +132,7 @@ On the GBA: **Up/Down** and **A** choose in the menu, **B** goes back to it, **L
 
 **Play while you watch a screen:** on any status screen, **hold SELECT** for half a second and the GBA's buttons control mGBA while the screen stays up (the bottom line turns yellow). Hold SELECT again to get the screen's buttons back. A quick SELECT press still reaches the game.
 
-- **Games:** Pokémon Ruby, Sapphire, Emerald, FireRed and LeafGreen, **English**, every revision (Ruby/Sapphire 1.0–1.2, FireRed/LeafGreen 1.0–1.1).
+- **Games:** Pokémon Ruby, Sapphire, Emerald, FireRed and LeafGreen, every revision, in English, French, German, Italian, Spanish and Japanese. The GBA's helper, menu and screens are in the game's language (Japanese in kana). For the games other than English and German Ruby/Sapphire, the app finds where the game keeps its data when you press Play, and the Log says so (or why it couldn't).
 - **Shinygati's QoL builds:** [pokeemeraldQoL](https://github.com/Shinygati/pokeemeraldQoL) (Emerald) and [pokefireredQoL](https://github.com/Shinygati/pokefireredQoL) (FireRed/LeafGreen v1.1), as built from their `master` branches with `make` (agbcc). The menu has no RNG screen for these.
 - **Your own builds of the decomps** (including newer QoL builds, whose data moves whenever the code changes): put the build's symbol file next to the ROM: `pokeemerald.sym` (from `make syms`) or `pokeemerald.elf`, in the same folder as the ROM (the ROM can have another name). The app checks it belongs to that ROM (the Log says if it doesn't) and reads the addresses from it; the menu has no RNG screen for these either.
 - **Other ROM hacks** move the game's data around, so the screens say they can't read them; controller mode still works.
@@ -151,7 +151,7 @@ While you play, **Wonder Cards…** on the play screen lists every card from the
 - **Use now:** the ticked cards' gifts or effects happen straight away, one after another, as if the deliveryman had just handed each one over. Nothing is saved as a Wonder Card, so the card your game already has stays. Cards marked *until reset* (the speed cards, Walk Through Walls, PC Anywhere and others) keep running until the game is reset; they all use the same spare memory, so only one of them can be on at a time. Ticking one unticks the others, and using one while another is on offers **Replace**: the old one is switched off and the new one goes on.
 - **Receive Wondercard** (one ticked card): the card is saved the way Mystery Gift saves one. Talk to the deliveryman in green on any Pokémon Center's 2F to get the gift (go in again if you're already there), and save in the game to keep the card. A game keeps one card at a time.
 - The ticks are remembered for each game.
-- Only the original English games, checked against the No-Intro list of good dumps (a ROM hack or a bad dump can't take them: the cards' code is made for the exact ROMs). Load your game first; a card waits until you can walk around.
+- Every language's Emerald, FireRed and LeafGreen, each with the cards made for it (the Japanese games: Use now only). Only the original games, checked against the No-Intro list of good dumps (a ROM hack or a bad dump can't take them: the cards' code is made for the exact ROMs). Load your game first; a card waits until you can walk around.
 
 ## Version and updates
 
@@ -164,7 +164,7 @@ The version is shown beside the name at the top of the window. When the app star
 - **Closing the window.** If you close the window while a game is running, the app keeps going in the background. Your save is still copied to the cartridge. If it needs you (for example, to switch the GBA on), the window opens again by itself. If everything went fine, it just quits when you close mGBA.
 - **If a save couldn't be copied.** It's kept on your PC. The next time you play that game, the app offers to copy it to the cartridge first.
 - **Every write is checked.** Each save written to the cartridge is read back and verified.
-- **Where settings live.** The app's settings are kept in `%APPDATA%\GBLinkSaveSync`.
+- **Where settings live.** The app's settings are kept in `%APPDATA%\GBLinkCompanion`.
 
 ---
 
@@ -176,11 +176,11 @@ You need Go 1.24 or newer.
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H windowsgui" -o GBLinkCompanion.exe .
 ```
 
-The GBA helper (`assets/gblink_sync_mb.gba`) and the mGBA script (`assets/gblink_controller.lua`) are built into the app. To change the helper, build it from `b2s/gba` with devkitARM or `arm-none-eabi-gcc` and `gbafix` on your PATH, then copy it into `assets/` before building the app:
+The GBA helper (`assets/gblink_companion_mb.gba`) and the mGBA script (`assets/gblink_controller.lua`) are built into the app. To change the helper, build it from `b2s/gba` with devkitARM or `arm-none-eabi-gcc` and `gbafix` on your PATH, then copy it into `assets/` before building the app:
 
 ```
 make -C ../b2s/gba
-cp ../b2s/gba/gblink_sync_mb.gba assets/
+cp ../b2s/gba/gblink_companion_mb.gba assets/
 ```
 
 | File | What it is |
@@ -192,7 +192,7 @@ cp ../b2s/gba/gblink_sync_mb.gba assets/
 | `link.go` | GB-Link serial transport, GBA multiboot, and the helper program's protocol |
 | `files.go` | Settings, per-game state, saves and backups |
 | `platform_windows.go` | Windows file and folder pickers |
-| `assets/gblink_sync_mb.gba` | The helper program sent to the GBA: [Burn2Slot for GB-Link](../b2s), built with this app's own screens |
+| `assets/gblink_companion_mb.gba` | The helper program sent to the GBA: [Burn2Slot for GB-Link](../b2s), built with this app's own screens |
 | `symfile.go` | Your own builds: reads the `.sym`/`.elf` next to the ROM for the script's addresses |
 | `status.go` | The GBA's menu and status screens: reads the GBA's buttons, gets screens from the mGBA script, and sends the GBA what changed |
 | `assets/gblink_controller.lua` | The mGBA script: the GBA's buttons into mGBA, and reading the Pokémon game for the status screens. Its addresses come from pret's symbol files ([pokeruby](https://github.com/pret/pokeruby), [pokeemerald](https://github.com/pret/pokeemerald), [pokefirered](https://github.com/pret/pokefirered), `symbols` branches) |

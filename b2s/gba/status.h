@@ -1,7 +1,7 @@
 #ifndef STATUS_H
 #define STATUS_H
 #include "gba.h"
-/* Status screens for the mGBA save-sync launcher (CMD_STATUS): the PC draws a 40x17 text grid
+/* Status screens for GB-Link Companion (CMD_STATUS): the PC draws a 40x17 text grid
  * (5x8 font in 6x9 cells) and an optional region map, and the GBA just shows them. The PC runs
  * the menus from the buttons it reads with KEYS; the GBA only draws what it's sent. */
 #define ST_COLS 40

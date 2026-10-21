@@ -32,6 +32,9 @@ int main(int argc, char **argv)
     static color_t video[256 * 224];
     core->setVideoBuffer(core, video, 256);
     if (!mCoreLoadFile(core, argv[1])) { fprintf(stderr, "can't load ROM\n"); return 1; }
+    if (getenv("RUNLUA_SAVE")) {                  /* the .sav next to the ROM, as mGBA loads it (and its clock) */
+        if (!mCoreAutoloadSave(core)) fprintf(stderr, "no save loaded\n");
+    }
     core->reset(core);
 
     struct mScriptContext ctx;

@@ -1,5 +1,5 @@
 // GB-Link transport, GBA multiboot, and the protocol of the helper program that runs on the GBA
-// (the Burn2Slot for GB-Link flasher, built with the save-sync screens: see b2s/gba/proto.h).
+// (the Burn2Slot for GB-Link flasher, built with GB-Link Companion's screens: see b2s/gba/proto.h).
 package main
 
 import (
@@ -339,6 +339,7 @@ const (
 	cmdShow      = 9
 	cmdROMInfo   = 10
 	cmdROMRead   = 11
+	cmdRTCRead   = 13
 	msgControl   = 1
 	msgStopped   = 2 // a backup was cancelled or failed
 	msgBackupSav = 3 // the next save read is part of a backup

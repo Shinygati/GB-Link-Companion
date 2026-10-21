@@ -340,6 +340,7 @@ static u32 clock_word(u32 hw)
 
 /* --------------------------------------------------------------------- UI stubs */
 static int verbose;
+u8 ui_jp;
 void ui_init(void) {}
 void ui_clear_line(int row) { (void)row; }
 void ui_text(int row, int col, int color, const char *s) { (void)col; (void)color; if (verbose && (row == 10 || row == 5)) fprintf(stderr, "[gba] %s\n", s); }

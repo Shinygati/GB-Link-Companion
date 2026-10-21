@@ -31,7 +31,7 @@ wrapper = os.path.join(tmp, 'mgba.sh')
 open(wrapper, 'w').write(f'#!/bin/sh\nexec {sys.executable} {HERE}/fake_mgba_ctl.py "$@"\n'); os.chmod(wrapper, 0o755)
 
 gba = FakeGBLink(cart, 'sram32', log=lambda m: print('  [gba]', m))
-env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_SYNC_HOME=os.path.join(tmp, 'home'), GBLINK_TEST_HOOKS='47950',
+env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_COMPANION_HOME=os.path.join(tmp, 'home'), GBLINK_TEST_HOOKS='47950',
            GBLINK_TEST_PICK=games, FAKE_CTL=ctl, FAKE_SECONDS='14', FAKE_SAVE_AT='9' if OFF else '5',
            LIBGL_ALWAYS_SOFTWARE='1', GBLINK_MULTI='1')
 app = subprocess.Popen([APP], env=env, stdout=open(os.path.join(tmp, 'app.log'), 'w'), stderr=subprocess.STDOUT, cwd=tmp)
@@ -126,6 +126,10 @@ else:
 s = wait(lambda s: s['Phase'] == 'done', 40, 'done')
 shot('9_done')
 checks['finished: done'] = s['Result'] == 'done'
+bdir = os.path.join(games, 'gblink_backups', 'Sim Game')
+checks['saves made in mGBA backed up in the ROM folder'] = os.path.isdir(bdir) and any(f.endswith('-mgba.sav') for f in os.listdir(bdir))
+sav = os.path.join(games, 'Sim Game.sav')
+checks['.sav is just the save (no clock data)'] = os.path.getsize(sav) == 0x8000
 cmd('click settings'); shot('10_settings'); cmd('click settings-done')
 cmd('click home')
 s = wait(lambda s: s['Phase'] == 'home', 10, 'home')

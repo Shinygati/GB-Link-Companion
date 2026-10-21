@@ -1,8 +1,10 @@
-/* Status screens drawn for the mGBA save-sync launcher: text grid + region map (mode 3). */
+/* Status screens drawn for GB-Link Companion: text grid + region map (mode 3). */
 #include "gba.h"
 #include "proto.h"
 #include "status.h"
 #include "font_small.h"
+#include "font_kana.h"
+#include "ui.h"
 
 #ifdef B2S_SIM
 static u16 sim_vram[240 * 160];          /* the simulator has no screen: draw into memory */
@@ -84,36 +86,54 @@ static void clear_all(void)
     bk_x1 = 0;
 }
 
+/* Is pixel (x, y) of a text cell's 6x8 glyph set? ASCII and Latin-1 from the 5x8 font; with the
+ * Japanese font a kana is 12 px wide over two cells (its code, then 0xFF), drawn 2 px in. */
+static int glyph_bit(int row, int col, int x, int y)
+{
+    u8 ch = shown_ch[row][col];
+    if (ui_jp && kana_of[ch]) {
+        int kx = x - 2;
+        return kx >= 0 && kx < 8 && (kana8[kana_of[ch] - 1][y] >> kx & 1);
+    }
+    if (ch == 0xFF) {
+        u8 l = col > 0 ? shown_ch[row][col - 1] : 0;
+        if (!(ui_jp && kana_of[l])) return 0;
+        int kx = x + CELL_W - 2;
+        return kx < 8 && (kana8[kana_of[l] - 1][y] >> kx & 1);
+    }
+    if (x < 1) return 0;                   /* 1 px in from the left, so the screen edge doesn't cut it */
+    int i = ch >= 0x20 && ch < 0x7F ? ch - 0x20 : ch >= 0xA0 ? ch - 0xA0 + 95 : '?' - 0x20;
+    return font5x8[i][y] >> (x - 1) & 1;
+}
+
 static void draw_glyph(int row, int col);
 static void put(int row, int col, u8 ch, u8 co)
 {
-    if (ch < 32 || ch > 126) ch = '?';
     if (shown_ch[row][col] == ch && shown_co[row][col] == co) return;
     shown_ch[row][col] = ch; shown_co[row][col] = co;
+    if (col + 1 < ST_COLS && shown_ch[row][col + 1] == 0xFF) shown_ch[row][col + 1] = 0;   /* its right half: draw it again */
     if (!under_sprite(row, col)) draw_glyph(row, col);
 }
 
 static void draw_glyph(int row, int col)
 {
-    u8 ch = shown_ch[row][col], co = shown_co[row][col];
+    u8 co = shown_co[row][col];
     if (on_back(row, col)) {               /* over the picture: its pixels, then the text in darker colours */
         static const u16 dark[8] = { RGB(3,5,12), RGB(9,10,14), RGB(1,13,4), RGB(21,2,2), RGB(25,9,0), RGB(2,8,22), RGB(3,5,12), RGB(3,5,12) };
         int x0 = col * CELL_W, y0 = TOP + row * CELL_H;
-        const unsigned char *g = font5x8[(ch < 32 || ch > 126 ? '?' : ch) - 32];
         for (int y = 0; y < CELL_H; y++)
             for (int x = 0; x < CELL_W; x++) VRAM16[(y0 + y) * 240 + x0 + x] = back[(y0 + y) * 240 + x0 + x];
         for (int y = 0; y < SFONT_H; y++)
-            for (int x = 0; x < 5; x++)
-                if (g[y] >> x & 1) VRAM16[(y0 + y + 1) * 240 + x0 + x + 1] = dark[co & 7];
+            for (int x = 0; x < CELL_W; x++)
+                if (glyph_bit(row, col, x, y)) VRAM16[(y0 + y + 1) * 240 + x0 + x] = dark[co & 7];
         return;
     }
-    const unsigned char *g = font5x8[ch - 32];
     u16 fg = tcol[co & 7];
     vu16 *p = VRAM16 + (TOP + row * CELL_H) * 240 + col * CELL_W;
     for (int x = 0; x < CELL_W; x++) p[x] = BG;                     /* 1 px of space above */
     p += 240;
     for (int y = 0; y < SFONT_H; y++, p += 240)
-        for (int x = 0; x < CELL_W; x++) p[x] = (x >= 1 && (g[y] >> (x - 1) & 1)) ? fg : BG;   /* 1 px in from the left, so the screen edge doesn't cut it */
+        for (int x = 0; x < CELL_W; x++) p[x] = glyph_bit(row, col, x, y) ? fg : BG;
 }
 
 /* one map cell: a filled square with a 1 px gap, so the shape of the region shows */

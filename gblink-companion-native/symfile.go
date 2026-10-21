@@ -92,13 +92,19 @@ func gen3Text(s string) []byte {
 
 // symMatchesROM: are the build's Pokemon names where its symbols say, in this ROM?
 func symMatchesROM(rom []byte, syms map[string]uint32) bool {
+	names := langNames['E']
+	if len(rom) >= 0xB0 {
+		if n, ok := langNames[rom[0xAF]]; ok && rom[0xAF] != 'J' {
+			names = n
+		}
+	}
 	at := func(addr uint32, text string) bool {
-		want := gen3Text(text)
+		want := gameText(text, false)
 		off := int64(addr) - 0x08000000
 		return off >= 0 && off+int64(len(want)) <= int64(len(rom)) && string(rom[off:off+int64(len(want))]) == string(want)
 	}
 	sp, ok := syms["gSpeciesNames"]
-	if !ok || !at(sp+11, "BULBASAUR") {
+	if !ok || !at(sp+11, names[0]) {
 		return false
 	}
 	nat, ok := syms["gNatureNamePointers"]
@@ -110,7 +116,7 @@ func symMatchesROM(rom []byte, syms map[string]uint32) bool {
 	}
 	o := nat - 0x08000000
 	p := uint32(rom[o]) | uint32(rom[o+1])<<8 | uint32(rom[o+2])<<16 | uint32(rom[o+3])<<24
-	return at(p, "HARDY")
+	return at(p, names[4])
 }
 
 func readSymbols(path string) (map[string]uint32, error) {
@@ -196,6 +202,9 @@ func luaOverride(rom, code string, log func(string, ...any)) string {
 		return ""
 	}
 	parts := []string{fmt.Sprintf("code = %q", code), fmt.Sprintf("game = %q", game), `build = "own build"`, "custom = true"}
+	if l := gameLang(code); l != 'E' {
+		parts = append(parts, fmt.Sprintf("lang = %q", string(l))) // its names are checked in that language
+	}
 	have := map[string]bool{}
 	for _, f := range symFields {
 		if (f.field == "sb1" && have["sb1ptr"]) || (f.field == "sb2" && have["sb2ptr"]) {

@@ -110,8 +110,8 @@ You need an `arm-none-eabi` GCC (devkitARM or a distro package) and `gbafix` (fr
 
 ```
 make                 # gba/burn2slot_mb.gba  ->  web/burn2slot_mb.js
-                     # also gba/gblink_sync_mb.gba: the same program with the screens of the
-                     # mGBA save-sync launcher (built with -DSYNC_UI)
+                     # also gba/gblink_companion_mb.gba: the same program with the screens of the
+                     # GB-Link Companion (built with -DCOMPANION_UI)
 make test            # native simulator tests (needs a C compiler and node)
 ```
 
@@ -139,7 +139,7 @@ make test            # native simulator tests (needs a C compiler and node)
 - **`test/mgba_link.c`** runs the actual GBA binary in mGBA (`libmgba-dev`) and plays the GB-Link on its link port with the adapter's timing. `test/run_mgba.js` checks the real ARM link code, including full 64 KB packets. `test/run_mgba_save.js` restores and backs up a save through mGBA's emulated save chip.
 - **`test/run_mgba_keys.js`** checks controller mode (the `KEYS` word the mGBA launcher uses to read the GBA's buttons) on the real binary.
 - **`test/run_mgba_rom.js`** dumps a 2 MB test cartridge through the real binary in mGBA (ROM size from open bus, then the ROM in 32 KB chunks) and compares it byte for byte. With `SIM=<misalign%>`, it does the same in the simulator. This uses the `ROM_INFO`/`ROM_READ` commands that the save-sync app's cartridge backup relies on.
-- **`test/shots_sync.js`** saves screenshots of the save-sync helper's screens from mGBA, for checking the progress bar and text.
+- **`test/shots_companion.js`** saves screenshots of GB-Link Companion helper's screens from mGBA, for checking the progress bar and text.
 - **`test/browser_test.py`** clicks through the real page in headless Chromium (Playwright), with the USB connection bridged to the simulator.
 
 ---
@@ -166,7 +166,7 @@ make test            # native simulator tests (needs a C compiler and node)
 
 ### Status screens (GB-Link Companion)
 
-The helper built for GB-Link Companion (`gblink_sync_mb.gba`) can also show status screens while
+The helper built for GB-Link Companion (`gblink_companion_mb.gba`) can also show status screens while
 you play in mGBA: `CMD_STATUS` (`gba/status.c`, `gba/proto.h`) draws a 40x17 text grid, a region
 map and pictures that the PC sends. The PC runs the menus from the GBA's buttons (`KEYS`); the GBA
 only draws. Any other command puts the normal screen back first.

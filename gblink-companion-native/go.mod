@@ -1,4 +1,4 @@
-module gblinksync
+module gblinkcompanion
 
 go 1.24.0
 

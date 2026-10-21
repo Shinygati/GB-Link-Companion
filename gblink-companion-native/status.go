@@ -50,6 +50,9 @@ func modeFromKey(k string) int {
 }
 
 // What the GBA shows, for the window.
+// the status screens' titles on the GBA, before the script sends a screen
+var screenTitles = map[int]string{modeRNG: "RNG STATE", modeWild: "WILD POKEMON", modeTrainer: "TRAINER'S TEAM", modeMap: "MAP LOCATION"}
+
 var modeTitles = map[int]string{modeController: "", modeRNG: "RNG state", modeWild: "Wild Pokémon",
 	modeTrainer: "Trainer's team", modeMap: "Map location", modeMenu: "its menu", modeEncounters: "the encounter tracker"}
 
@@ -743,17 +746,19 @@ func (b *Bridge) setMode(m int) {
 // --------------------------------------------------------------------------- the screens
 type cellText [stRows][stCols]uint16 // char | colour << 8
 
-func putText(t *cellText, row, col int, color byte, s string) {
+// putText: s (UTF-8) at row, col; jp: with the Japanese font (lang.go)
+func putText(t *cellText, jp bool, row, col int, color byte, s string) {
 	if row < 0 || row >= stRows {
 		return
 	}
-	for i := 0; i < len(s) && col+i < stCols; i++ {
-		c := s[i]
-		if c < 32 || c > 126 {
-			c = '?'
+	cs := cells(s, jp)
+	for i := 0; i < len(cs) && col+i < stCols; i++ {
+		c := cs[i]
+		if c != 0xFF && i+1 < len(cs) && cs[i+1] == 0xFF && col+i+1 >= stCols {
+			c = ' ' // half a kana doesn't fit
 		}
 		if col+i >= 0 {
-			t[row][col+i] = uint16(c) | uint16(color)<<8
+			t[row][col+i] = c | uint16(color)<<8
 		}
 	}
 }
@@ -811,7 +816,10 @@ func (b *Bridge) compose() (cellText, *stMap, map[int]placed, map[int][]byte) {
 	game, problem, connected := b.game, b.gameProblem, len(b.clients) > 0
 	scr := b.screens[st.mode]
 	b.mu.Unlock()
-	right := func(row int, color byte, s string) { putText(&t, row, stCols-len(s), color, s) }
+	jp := b.lang == 'J'
+	put := func(row, col int, color byte, s string) { putText(&t, jp, row, col, color, s) }
+	right := func(row int, color byte, s string) { put(row, stCols-textWidth(s, jp), color, s) }
+	tr := b.tr
 
 	st.wantBg, st.wantBgY, st.wantBase = "", 0, ""
 	b.mu.Lock()
@@ -830,30 +838,30 @@ func (b *Bridge) compose() (cellText, *stMap, map[int]placed, map[int][]byte) {
 				left = 10
 			}
 		}
-		putText(&t, 0, 0, colCyan, "GB-LINK STATUS")
+		put(0, 0, colCyan, tr("GB-LINK STATUS"))
 		right(0, colCyan, game)
 		items := b.items()
 		st.menuSel = min(st.menuSel, len(items)-1)
 		for i, it := range items {
 			if i == st.menuSel {
-				putText(&t, 2+i*2, left, colYellow, "> "+it.label)
+				put(2+i*2, left, colYellow, "> "+tr(it.label))
 			} else {
-				putText(&t, 2+i*2, left+2, colWhite, it.label)
+				put(2+i*2, left+2, colWhite, tr(it.label))
 			}
 		}
 		row := 12
 		switch {
 		case !connected:
-			putText(&t, row, 0, colRed, "mGBA's script isn't connected yet.")
+			put(row, 0, colRed, tr("mGBA's script isn't connected yet."))
 		case problem != "":
 			for i, l := range wrap(problem, stCols) {
 				if i < 3 {
-					putText(&t, row+i, 0, colRed, l)
+					put(row+i, 0, colRed, l)
 				}
 			}
 		}
-		putText(&t, 15, 0, colGrey, "Up/Down + A: choose. In a screen: B back")
-		putText(&t, 16, 0, colGrey, "Controller: hold SELECT for the menu")
+		put(15, 0, colGrey, tr("Up/Down + A: choose. In a screen: B back"))
+		put(16, 0, colGrey, tr("Controller: hold SELECT for the menu"))
 		return t, nil, nil, nil
 	}
 
@@ -862,81 +870,81 @@ func (b *Bridge) compose() (cellText, *stMap, map[int]placed, map[int][]byte) {
 		last, shiny := b.encLast, b.encShiny
 		b.mu.Unlock()
 		gs := b.s.state
-		putText(&t, 0, 0, colCyan, "ENCOUNTER TRACKER")
+		put(0, 0, colCyan, tr("ENCOUNTER TRACKER"))
 		right(0, colCyan, game)
-		putText(&t, 2, 0, colWhite, "Encounters")
-		putText(&t, 2, 16, colYellow, commaInt(gs.EncCount))
+		put(2, 0, colWhite, tr("Encounters"))
+		put(2, 16, colYellow, commaInt(gs.EncCount))
 		if gs.EncTracking {
-			putText(&t, 3, 0, colGreen, "Counting every wild Pokemon")
+			put(3, 0, colGreen, tr("Counting every wild Pokemon"))
 		} else {
-			putText(&t, 3, 0, colGrey, "Not counting - START to begin")
+			put(3, 0, colGrey, tr("Not counting - START to begin"))
 		}
-		putText(&t, 5, 0, colWhite, "This session")
-		putText(&t, 5, 16, colWhite, commaInt(st.encSession))
+		put(5, 0, colWhite, tr("This session"))
+		put(5, 16, colWhite, commaInt(st.encSession))
 		switch {
 		case last == "":
-			putText(&t, 6, 0, colGrey, "No wild Pokemon yet")
+			put(6, 0, colGrey, tr("No wild Pokemon yet"))
 		case shiny:
-			putText(&t, 6, 0, colYellow, "Last  "+last+"  SHINY!")
+			put(6, 0, colYellow, tr("Last")+"  "+last+"  "+tr("SHINY!"))
 		default:
-			putText(&t, 6, 0, colWhite, "Last  "+last)
+			put(6, 0, colWhite, tr("Last")+"  "+last)
 		}
 		if st.encEdit {
 			digits := fmt.Sprintf("%06d", st.encVal)
-			putText(&t, 9, 0, colCyan, "Set the count:")
-			putText(&t, 9, 16, colWhite, digits)
-			putText(&t, 10, 16+5-st.encDigit, colYellow, "^")
-			putText(&t, 15, 0, colGrey, "<>: digit  ^v: change  A: set  B: cancel")
+			put(9, 0, colCyan, tr("Set the count:"))
+			put(9, 16, colWhite, digits)
+			put(10, 16+5-st.encDigit, colYellow, "^")
+			put(15, 0, colGrey, tr("<>: digit  ^v: change  A: set  B: cancel"))
 		} else {
-			putText(&t, 15, 0, colGrey, "START: count on/off   A: set the count")
+			put(15, 0, colGrey, tr("START: count on/off   A: set the count"))
 		}
 		if st.passthru {
-			putText(&t, 16, 0, colYellow, padRight("Playing in mGBA - hold SELECT to stop", 37))
+			put(16, 0, colYellow, padCells(tr("Playing in mGBA - hold SELECT to stop"), 37, jp))
 		} else if !st.encEdit {
-			putText(&t, 16, 0, colGrey, "B:menu  <>:screens  hold SELECT:play")
+			put(16, 0, colGrey, tr("B:menu  <>:screens  hold SELECT:play"))
 		}
 		if !connected {
-			putText(&t, 12, 0, colRed, "mGBA's script isn't connected yet.")
+			put(12, 0, colRed, tr("mGBA's script isn't connected yet."))
 		}
 		return t, nil, nil, nil
 	}
 	if scr == nil || len(scr.lines) == 0 {
-		putText(&t, 0, 0, colCyan, strings.ToUpper(modeTitles[st.mode]))
+		put(0, 0, colCyan, tr(screenTitles[st.mode]))
 		right(0, colCyan, game)
 		switch {
 		case !connected:
-			putText(&t, 2, 0, colRed, "mGBA's script isn't connected yet.")
-			putText(&t, 3, 0, colGrey, "See the GB-Link Companion window.")
+			put(2, 0, colRed, tr("mGBA's script isn't connected yet."))
+			put(3, 0, colGrey, tr("See the GB-Link Companion window."))
 		case problem != "":
 			for i, l := range wrap(problem, stCols) {
-				putText(&t, 2+i, 0, colRed, l)
+				put(2+i, 0, colRed, l)
 			}
 		default:
-			putText(&t, 2, 0, colGrey, "Waiting for mGBA...")
+			put(2, 0, colGrey, tr("Waiting for mGBA..."))
 		}
-		putText(&t, 16, 0, colGrey, "B: menu")
+		put(16, 0, colGrey, tr("B: menu"))
 		return t, nil, nil, nil
 	}
 
-	putText(&t, 0, 0, scr.lines[0].color, scr.lines[0].text)
+	put(0, 0, scr.lines[0].color, scr.lines[0].text)
 	body := scr.lines[1:]
 	if st.mode == modeMap {
 		for i := 0; i < len(body) && i < 2; i++ {
-			putText(&t, 1+i, 0, body[i].color, body[i].text)
+			put(1+i, 0, body[i].color, body[i].text)
 		}
 		st.wantPic = nil
 		switch {
 		case st.passthru:
-			right(2, colYellow, " playing")
+			right(2, colYellow, " "+tr("playing"))
 		case st.curOn && st.preview:
-			right(1, colGrey, "  B:back")
+			right(1, colGrey, "  "+tr("B:back"))
 			if scr.picture != nil {
 				st.wantPic = scr.picture
 			}
 		case st.curOn:
-			right(1, colGrey, "  A:pick B:back")
+			right(1, colGrey, "  "+tr("A:pick B:back"))
 		default:
-			right(2, colGrey, " A:look")
+			right(2, colGrey, " "+tr("A:look"))
 		}
 		// the game's own map: its picture, your icon, and the cursor
 		var want map[int]placed
@@ -970,11 +978,11 @@ func (b *Bridge) compose() (cellText, *stMap, map[int]placed, map[int][]byte) {
 	st.scroll = max(0, min(st.scroll, maxScroll))
 	for i := 0; i < stBodyRows && st.scroll+i < len(body); i++ {
 		l := body[st.scroll+i]
-		putText(&t, 1+i, 0, l.color, l.text)
+		put(1+i, 0, l.color, l.text)
 	}
-	hint := "B:menu  <>:screens  hold SELECT:play"
+	hint := tr("B:menu  <>:screens  hold SELECT:play")
 	if maxScroll > 0 {
-		hint = "B:menu ^v:scroll  hold SELECT:play"
+		hint = tr("B:menu ^v:scroll  hold SELECT:play")
 		more := ""
 		if st.scroll > 0 {
 			more += "^"
@@ -985,9 +993,9 @@ func (b *Bridge) compose() (cellText, *stMap, map[int]placed, map[int][]byte) {
 		right(16, colYellow, more)
 	}
 	if st.passthru {
-		putText(&t, 16, 0, colYellow, padRight("Playing in mGBA - hold SELECT to stop", 37))
+		put(16, 0, colYellow, padCells(tr("Playing in mGBA - hold SELECT to stop"), 37, jp))
 	} else {
-		putText(&t, 16, 0, colGrey, hint)
+		put(16, 0, colGrey, hint)
 	}
 	// pictures, scrolled with their lines; only where they fit between the title and the hints
 	want, data := map[int]placed{}, map[int][]byte{}

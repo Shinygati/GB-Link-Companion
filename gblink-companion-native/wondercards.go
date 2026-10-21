@@ -1,8 +1,9 @@
 // Wonder Cards for Pokémon Emerald, FireRed and LeafGreen, sent to the game running in mGBA.
 //
 // The cards are the GB-Link team's (https://github.com/GB-Link/gblink-wondercards, GPL-3.0):
-// every card of their page, as .wc3 files for the English games, in assets/wondercards (one
-// folder per game and revision: BPEE0, BPRE0, BPRE1, BPGE0, BPGE1) with index.json.
+// every card of their page, as .wc3 files for every language's games, in assets/wondercards (one
+// folder per game, language and revision: BPEE0, BPEF0, BPRJ1, ...) with index.json. Each is the
+// card their page sends to that ROM: the GB-Link Team's own cards are made for each ROM.
 //
 // Two ways to send one (the mGBA script does the writing, see "Wonder Cards" in the script):
 //   - Add it to the game: what Mystery Gift does when it receives a card. The deliveryman on
@@ -12,8 +13,9 @@
 //     keep running until the game is reset (speed, Walk Through Walls...) all use the same free
 //     RAM, so only one of those can be on at a time.
 //
-// Only for ROMs that match No-Intro's good dumps of the English games: the cards' code is made
-// for exactly those ROMs.
+// Only for ROMs that match No-Intro's good dumps: the cards' code is made for exactly those ROMs.
+// The Japanese games' cards are shorter and their Mystery Gift save is laid out otherwise, so
+// there a card is only used now (the script runs its RAM script where those games keep it).
 package main
 
 import (
@@ -86,7 +88,10 @@ func wonderCardsFor(key string) []WonderCard {
 func wcCheckROM(g *Game) (string, string) {
 	key := wcGameKey(g.ROM)
 	if key == "" {
-		return "", "Wonder Cards are for Pokémon Emerald, FireRed and LeafGreen (English)."
+		if c := strings.ToUpper(g.Code); strings.HasPrefix(c, "AXV") || strings.HasPrefix(c, "AXP") {
+			return "", "Ruby and Sapphire have no Wonder Cards: Mystery Gift came with Emerald, FireRed and LeafGreen."
+		}
+		return "", "Wonder Cards are for Pokémon Emerald, FireRed and LeafGreen."
 	}
 	h, ok := hashes.get(g.ROM)
 	if !ok {
@@ -101,12 +106,17 @@ func wcCheckROM(g *Game) (string, string) {
 	return key, ""
 }
 
-// wc3Parts: a .wc3's card (332 bytes), icon species (2) and RAM script data (1000).
+// wc3Parts: a .wc3's card (332 bytes; the Japanese games' 164), icon species (2) and RAM script
+// data (1000).
 func wc3Parts(b []byte) (card, icon, data []byte, err error) {
-	if len(b) != 0x58C {
+	switch len(b) {
+	case 0x58C:
+		card, icon, data = b[4:4+332], b[0x15A:0x15C], b[0x1A4:0x1A4+1000]
+	case 0x4E4: // Japanese
+		card, icon, data = b[4:4+164], b[0xB2:0xB4], b[0xFC:0xFC+1000]
+	default:
 		return nil, nil, nil, fmt.Errorf("not a .wc3 file (%d bytes)", len(b))
 	}
-	card, icon, data = b[4:4+332], b[0x15A:0x15C], b[0x1A4:0x1A4+1000]
 	flagID := int(card[0]) | int(card[1])<<8
 	typ, bg, send := card[8]&3, (card[8]>>2)&15, card[8]>>6
 	if flagID == 0 || typ >= 3 || send >= 3 || bg >= 8 || card[9] > 7 { // the games' ValidateWonderCard
@@ -371,3 +381,6 @@ func (a *App) chooseWonderCards(labels []string) {
 	s.game.saveState(s.state)
 	s.linkMu.Unlock()
 }
+
+// wcJapanese: the cards are for a Japanese game (they can only be used now)
+func wcJapanese(key string) bool { return len(key) >= 4 && key[3] == 'J' }

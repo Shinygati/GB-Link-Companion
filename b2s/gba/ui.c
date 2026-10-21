@@ -2,6 +2,9 @@
 #include "gba.h"
 #include "ui.h"
 #include "font.h"
+#include "font_kana.h"
+
+u8 ui_jp;                                  /* the Japanese font: kana instead of 0x01-0x1F, 0x5C, 0x60, 0x7F-0xFE */
 
 #define RGB(r, g, b) ((u16)((r) | (g) << 5 | (b) << 10))
 static const u16 colors[] = { RGB(31,31,31), RGB(16,16,18), RGB(8,28,10), RGB(31,8,8), RGB(31,26,6), RGB(10,24,31) };
@@ -13,12 +16,21 @@ void ui_init(void)
     for (int i = 0; i < 240 * 160; i++) VRAM16[i] = BG;
 }
 
-static void put(int row, int col, int color, char c)
+static void put(int row, int col, int color, char ch)
 {
+    u8 c = (u8)ch;
     if (row < 0 || row >= 13 || col < 0 || col >= 30) return;
-    if (c < 32 || c > 126) c = '?';
-    const unsigned char *g = font8x12[c - 32];
     vu16 *p = VRAM16 + (row * FONT_H + 2) * 240 + col * 8;
+    if (ui_jp && kana_of[c]) {             /* a kana: 8x8, 2 px down in the cell */
+        const unsigned char *k = kana8[kana_of[c] - 1];
+        for (int y = 0; y < FONT_H; y++, p += 240) {
+            int r = y - 2;
+            for (int x = 0; x < 8; x++) p[x] = (r >= 0 && r < 8 && (k[r] >> x & 1)) ? colors[color] : BG;
+        }
+        return;
+    }
+    int i = c >= 0x20 && c < 0x7F ? c - 0x20 : c >= 0xA0 ? c - 0xA0 + 95 : '?' - 0x20;
+    const unsigned char *g = font8x12[i];
     for (int y = 0; y < FONT_H; y++, p += 240)
         for (int x = 0; x < 8; x++) p[x] = (g[y] >> x & 1) ? colors[color] : BG;
 }

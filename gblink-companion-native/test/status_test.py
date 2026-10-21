@@ -17,7 +17,7 @@ from fake_gblink import FakeGBLink
 APP, SHOTS, KEY, SCEN = sys.argv[1:5]
 MGBA_LINK = os.environ.get('MGBA_LINK', os.path.join(HERE, '../../b2s/test/mgba_link'))
 RUNLUA = os.environ.get('RUNLUA', os.path.join(HERE, 'status/runlua'))
-HELPER = os.path.join(HERE, '../assets/gblink_sync_mb.gba')
+HELPER = os.path.join(HERE, '../assets/gblink_companion_mb.gba')
 os.makedirs(SHOTS, exist_ok=True)
 tmp = tempfile.mkdtemp()
 games = os.path.join(tmp, 'GBA Games'); os.makedirs(games)
@@ -70,7 +70,7 @@ gba = MGBALink(os.path.join(tmp, 'unused'), 'flash128', log=lambda m: print('  [
 wrapper = os.path.join(tmp, 'mgba.sh')         # "mGBA": mGBA --script LUA ROM
 open(wrapper, 'w').write(f'#!/bin/sh\n[ "$1" = "--script" ] || exit 1\nTHROTTLE_US=16000 exec {RUNLUA} "$3" "$2" 4300 2>>{tmp}/mgba.log\n')
 os.chmod(wrapper, 0o755)
-env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_SYNC_HOME=os.path.join(tmp, 'home'), GBLINK_TEST_HOOKS='47951',
+env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_COMPANION_HOME=os.path.join(tmp, 'home'), GBLINK_TEST_HOOKS='47951',
            GBLINK_TEST_PICK=games, LIBGL_ALWAYS_SOFTWARE='1', GBLINK_MULTI='1')
 app = subprocess.Popen([APP], env=env, stdout=open(os.path.join(tmp, 'app.log'), 'w'), stderr=subprocess.STDOUT, cwd=tmp)
 import atexit

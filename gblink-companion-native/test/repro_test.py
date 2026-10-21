@@ -22,7 +22,7 @@ def run(name, fill_ff, mode, rom_file=ROM):
     gba = FakeGBLink(cart, 'sram32', log=lambda m: None)
     home = os.path.join(tmp, 'home'); os.makedirs(home)
     open(os.path.join(home, 'settings.json'), 'w').write(json.dumps({'mgba': '/bin/true', 'gamesFolder': games, 'setupDone': True}))
-    env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_SYNC_HOME=home, GBLINK_TEST_HOOKS='47970', LIBGL_ALWAYS_SOFTWARE='1', GBLINK_MULTI='1')
+    env = dict(os.environ, GBLINK_PORT=gba.port, GBLINK_COMPANION_HOME=home, GBLINK_TEST_HOOKS='47970', LIBGL_ALWAYS_SOFTWARE='1', GBLINK_MULTI='1')
     app = subprocess.Popen([APP], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=tmp)
     for _ in range(100):
         try: sock = socket.create_connection(('127.0.0.1', 47970)); break

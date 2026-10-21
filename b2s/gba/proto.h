@@ -46,6 +46,10 @@
                                             (a repro cart's flash chip); the size was measured */
 #define ROM_SIZE_FLAGS     (ROM_SIZE_GUESSED | ROM_SIZE_REPRO)
 #define CMD_ROM_READ       11  /* args [offset, nbytes<=MAX_ROM_CHUNK, step, steps] -> [checksum, data...] */
+#define CMD_RTC_READ       13  /* -> [found, status, datetime bytes 0-3, bytes 4-6]: the cartridge's real-time clock
+                                  (Seiko S-3511, as Pokemon Ruby/Sapphire/Emerald have), read the way the games
+                                  read it. found 0: no answer. datetime: BCD year, month, day, weekday, hour,
+                                  minute, second */
 #define CMD_STATUS         12  /* args [op, nwords, ...] + data[nwords] -> draw a status screen (ST_OP_*) */
 #define MAX_SAVE_CHUNK     4096u
 #define MAX_SAVE_READ_CHUNK 0x4000u   /* reads: 16 KB a command. A chunk that's all one word (blank)
@@ -57,8 +61,9 @@
 #define MSG_BACKUP_STOPPED 2   /* a cartridge backup was cancelled or failed                  */
 #define MSG_BACKUP_SAVE    3   /* the save about to be read is part of a backup               */
 #define MSG_BACKUP_DONE    4   /* a cartridge backup finished                                 */
+#define MSG_LANG           5   /* arg 1: the language of the text (E F D I S J) - the Pokemon game's */
 
-/* CMD_STATUS ops: the save-sync launcher's status screens (gba/status.c). The PC builds the
+/* CMD_STATUS ops: GB-Link Companion's status screens (gba/status.c). The PC builds the
  * screens (menus, Pokemon info, map) and the GBA draws them; any other command puts the normal
  * screen back first. */
 #define ST_OP_CLEAR        1   /* blank status screen                                          */

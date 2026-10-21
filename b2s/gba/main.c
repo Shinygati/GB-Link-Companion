@@ -97,23 +97,51 @@ static void status_line(int color, const char *s)
 }
 
 /* Text that differs between the two builds: the web page's flasher (Burn2Slot for GB-Link) and
- * the helper the mGBA save-sync launcher sends (built with -DSYNC_UI). */
-#ifdef SYNC_UI
-#define T_TITLE      "GB-Link Companion for mGBA"
-#define T_SUBTITLE   "Playing in mGBA on your PC"
-#define T_FOOT1      "Keep the link cable in."
-#define T_FOOT2      "Don't switch off mid-save."
-#define T_WAITING    "Waiting for the PC..."
-#define T_HELLO      "Connected to the PC"
-#define T_INFO_DONE  "Cartridge found"
-#define T_READING    "Loading save into mGBA..."
-#define T_READ_DONE  "Save loaded into mGBA"
-#define T_WRITING    "Saving to the cart..."
-#define T_WRITE_DONE "Save written to the cart"
-#define L_READ       "Load"
-#define T_ROM_READ   "Copying the game to the PC..."
-#define T_ROM_DONE   "Game copied to the PC"
-#define L_WRITE      "Save"
+ * the helper GB-Link Companion sends (built with -DCOMPANION_UI). */
+#ifdef COMPANION_UI
+/* in the Pokemon game's language: GB-Link Companion sets the letter after "GBLLANG=" in this
+ * program before it sends it (E, F, D, I, S or J), and can change it later (MSG_LANG) */
+#include "lang.h"
+static volatile const char lang_marker[] = "GBLLANG=E";
+static u32 lang_i;
+static void set_lang(char c)
+{
+    lang_i = 0;
+    for (u32 i = 0; i < N_LANGS; i++)
+        if (lang_codes[i] == c) lang_i = i;
+    ui_jp = lang_codes[lang_i] == 'J';
+}
+#define TR(s)        (lang_text[lang_i][s])
+#define T_TITLE      TR(S_GB_LINK_COMPANION_FOR_MGBA)
+#define T_SUBTITLE   TR(S_PLAYING_IN_MGBA_ON_YOUR_PC)
+#define T_FOOT1      TR(S_KEEP_THE_LINK_CABLE_IN)
+#define T_FOOT2      TR(S_DON_T_SWITCH_OFF_MID_SAVE)
+#define T_WAITING    TR(S_WAITING_FOR_THE_PC)
+#define T_HELLO      TR(S_CONNECTED_TO_THE_PC)
+#define T_INFO_DONE  TR(S_CARTRIDGE_FOUND)
+#define T_READING    TR(S_LOADING_SAVE_INTO_MGBA)
+#define T_READ_DONE  TR(S_SAVE_LOADED_INTO_MGBA)
+#define T_WRITING    TR(S_SAVING_TO_THE_CART)
+#define T_WRITE_DONE TR(S_SAVE_WRITTEN_TO_THE_CART)
+#define L_READ       TR(S_LOAD)
+#define T_ROM_READ   TR(S_COPYING_THE_GAME_TO_THE_PC)
+#define T_ROM_DONE   TR(S_GAME_COPIED_TO_THE_PC)
+#define L_WRITE      TR(S_SAVE)
+#define L_COPY       TR(S_COPY)
+#define T_CHECKING   TR(S_CHECKING_THE_CARTRIDGE)
+#define T_SAVE_COPY  TR(S_COPYING_THE_SAVE_TO_THE_PC)
+#define T_SAVE_COPIED TR(S_SAVE_COPIED_TO_THE_PC)
+#define T_NO_CART    TR(S_NO_CARTRIDGE_FOUND)
+#define T_BACKING_UP TR(S_BACKING_UP_A_CARTRIDGE)
+#define T_GAME       TR(S_GAME)
+#define T_SIZE       TR(S_SIZE)
+#define T_HOLD_SEL   TR(S_HOLD_SELECT_FOR_THE_MENU)
+#define T_CONTROL    TR(S_GBA_BUTTONS_CONTROL_MGBA)
+#define T_NOTHING    TR(S_NOTHING_WAS_SAVED)
+#define T_BK_STOPPED TR(S_BACKUP_STOPPED)
+#define T_SWITCH_OFF TR(S_YOU_CAN_SWITCH_THE_GBA_OFF)
+#define T_BK_DONE    TR(S_BACKUP_FINISHED)
+#define T_MGBA_CLOSED TR(S_MGBA_CLOSED)
 #else
 #define T_TITLE      "Burn2Slot for GB-Link"
 #define T_SUBTITLE   "Repro cart flasher v1.0"
@@ -130,6 +158,21 @@ static void status_line(int color, const char *s)
 #define T_ROM_READ   "Dumping the ROM..."
 #define T_ROM_DONE   "ROM dumped"
 #define L_WRITE      "Write"
+#define L_COPY       "Copy"
+#define T_CHECKING   "Checking the cartridge..."
+#define T_SAVE_COPY  "Copying the save to the PC..."
+#define T_SAVE_COPIED "Save copied to the PC"
+#define T_NO_CART    "No cartridge found"
+#define T_BACKING_UP "Backing up a cartridge"
+#define T_GAME       "Game:"
+#define T_SIZE       "Size:"
+#define T_HOLD_SEL   "Hold SELECT for the menu"
+#define T_CONTROL    "GBA buttons control mGBA"
+#define T_NOTHING    "Nothing was saved."
+#define T_BK_STOPPED "Backup stopped"
+#define T_SWITCH_OFF "You can switch the GBA off."
+#define T_BK_DONE    "Backup finished"
+#define T_MGBA_CLOSED "mGBA closed"
 #endif
 
 /* Progress on row 7. The bar shows work that is finished: it's drawn before an operation with
@@ -154,7 +197,7 @@ static void save_progress(u32 op, const char *label, const char *status, u32 nar
     else progress(op, label, status, args[1] + (after ? args[2] : 0), save_size(args[0]));
 }
 
-#ifndef SYNC_UI
+#ifndef COMPANION_UI
 static const char *const save_names[] = {"none", "SRAM 32 KB", "SRAM 64 KB", "Flash 64 KB", "Flash 128 KB", "EEPROM 512 B", "EEPROM 8 KB"};
 #endif
 
@@ -169,6 +212,63 @@ static void draw_home(void)
     cur_op = 0;
 }
 
+/* The cartridge's real-time clock (Seiko S-3511) on the cart's GPIO port, the way pret's siirtc.c
+ * reads it: 3 pins (SCK, SIO, CS), commands MSB first, data LSB first. The port reads back only
+ * while read-enable is on; it's switched off again so ROM reads see the ROM. */
+#ifndef B2S_SIM
+#define GPIO_DATA   (*(vu16 *)0x080000C4)
+#define GPIO_DIR    (*(vu16 *)0x080000C6)
+#define GPIO_ENABLE (*(vu16 *)0x080000C8)
+#define RTC_SCK 1
+#define RTC_SIO 2
+#define RTC_CS  4
+static void rtc_command(u8 v)
+{
+    for (int i = 0; i < 8; i++) {
+        u16 b = (u16)(((v >> (7 - i)) & 1) << 1);
+        GPIO_DATA = b | RTC_CS; GPIO_DATA = b | RTC_CS; GPIO_DATA = b | RTC_CS;
+        GPIO_DATA = b | RTC_CS | RTC_SCK;
+    }
+}
+static u8 rtc_byte(void)
+{
+    u8 v = 0;
+    for (int i = 0; i < 8; i++) {
+        for (int k = 0; k < 5; k++) GPIO_DATA = RTC_CS;
+        GPIO_DATA = RTC_CS | RTC_SCK;
+        v = (u8)((v >> 1) | (((GPIO_DATA & RTC_SIO) >> 1) << 7));
+    }
+    return v;
+}
+/* reads command cmd's n bytes into out */
+static void rtc_read(u8 cmd, u8 *out, int n)
+{
+    GPIO_DATA = RTC_SCK;
+    GPIO_DATA = RTC_SCK | RTC_CS;
+    GPIO_DIR = RTC_SCK | RTC_SIO | RTC_CS;
+    rtc_command(cmd);
+    GPIO_DIR = RTC_SCK | RTC_CS;
+    for (int i = 0; i < n; i++) out[i] = rtc_byte();
+    GPIO_DATA = RTC_SCK;
+    GPIO_DATA = RTC_SCK;
+}
+static int rtc_get(u8 *status, u8 *dt)
+{
+    GPIO_ENABLE = 1;
+    rtc_read(0x65, dt, 7);                 /* once to start the chip's transfer state off right */
+    rtc_read(0x63, status, 1);             /* status register */
+    rtc_read(0x65, dt, 7);                 /* date and time */
+    GPIO_DIR = 0;
+    GPIO_ENABLE = 0;
+    /* nothing there: the pins read back as all 1s or all 0s */
+    int same = 1;
+    for (int i = 1; i < 7; i++) same &= dt[i] == dt[0];
+    return !(same && (dt[0] == 0xFF || dt[0] == 0x00));
+}
+#else
+static int rtc_get(u8 *status, u8 *dt) { (void)status; (void)dt; return 0; }
+#endif
+
 static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
 {
     *nres = 0;
@@ -181,13 +281,13 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
         cur_op = 0;
     switch (cmd) {
     case CMD_SAVE_INFO: {
-        status_line(C_YELLOW, "Checking the cartridge...");
+        status_line(C_YELLOW, T_CHECKING);
         u32 fid, t = save_detect(&fid);
         res[0] = t; res[1] = fid; save_title(&res[2]); *nres = 6;
         ui_clear_line(3); ui_clear_line(4); ui_clear_line(5);
         char title[13]; for (int i = 0; i < 12; i++) { char c = (char)(res[2 + i / 4] >> (8 * (i & 3))); title[i] = (c >= 32 && c < 127) ? c : ' '; } title[12] = 0;
-        ui_text(3, 1, C_WHITE, "Game:"); ui_text(3, 7, C_CYAN, title);
-#ifndef SYNC_UI
+        ui_text(3, 1, C_WHITE, T_GAME); ui_text(3, 7, C_CYAN, title);
+#ifndef COMPANION_UI
         ui_text(4, 1, C_WHITE, "Save:"); ui_text(4, 7, C_CYAN, save_names[t]);
 #endif
         ui_clear_line(7);
@@ -197,7 +297,7 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
     case CMD_SAVE_READ: {
         if (nargs < 3 || args[2] > MAX_SAVE_READ_CHUNK || (args[2] & 3)) return ST_BAD_COMMAND;
         if (!save_size(args[0])) return ST_NO_SAVE;
-        const char *reading = backup_save ? "Copying the save to the PC..." : T_READING;
+        const char *reading = backup_save ? T_SAVE_COPY : T_READING;
         save_progress(CMD_SAVE_READ, L_READ, reading, nargs, 0);
         u8 *buf = (u8 *)(block + 1);
         if (save_read(args[0], args[1], args[2], buf)) return ST_TOO_BIG;
@@ -206,7 +306,7 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
         for (u32 i = 0; i < n; i++) { ck = CK_STEP(ck, block[1 + i]); same &= block[1 + i] == block[1]; }
         block[0] = ck;
         res_ptr = block; *nres = same && n > 1 ? 2 : n + 1;   /* all one word (blank): just that word */
-        if (nargs >= 5 ? args[3] + 1 >= args[4] : args[1] + args[2] >= save_size(args[0])) status_line(C_GREEN, backup_save ? "Save copied to the PC" : T_READ_DONE);
+        if (nargs >= 5 ? args[3] + 1 >= args[4] : args[1] + args[2] >= save_size(args[0])) status_line(C_GREEN, backup_save ? T_SAVE_COPIED : T_READ_DONE);
         return ST_OK;
     }
     case CMD_SAVE_WRITE: {
@@ -270,7 +370,7 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
          *  - the ROM chip shows up again from its start (a mirror: many official carts don't
          *    wire the top address lines, e.g. a 16 MB Pokemon cart repeats at 16 MB).
          * 8 KB is compared, header included, so a real game can't match by chance. */
-        status_line(C_YELLOW, "Checking the cartridge...");
+        status_line(C_YELLOW, T_CHECKING);
         u32 size = 0xFFFFFFFFu;
         if (ROM32(1) == 0x51AEFF24u) {                          /* the logo is there: a cart */
             for (size = 1u << 20; size < (1u << 25); size <<= 1) {
@@ -310,30 +410,39 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
         block[0] = size;
         for (u32 i = 0; i < 0xC0 / 4; i++) block[1 + i] = ROM32(i);
         res_ptr = block; *nres = 1 + 0xC0 / 4;
-        if (size == 0xFFFFFFFFu) { status_line(C_RED, "No cartridge found"); return ST_NO_SAVE; }
+        if (size == 0xFFFFFFFFu) { status_line(C_RED, T_NO_CART); return ST_NO_SAVE; }
         u32 shown = size & ~ROM_SIZE_FLAGS;
         char title[13]; for (int i = 0; i < 12; i++) { char c = (char)(block[1 + 0xA0 / 4 + i / 4] >> (8 * (i & 3))); title[i] = (c >= 32 && c < 127) ? c : ' '; } title[12] = 0;
         ui_clear_line(3); ui_clear_line(4); ui_clear_line(5); ui_clear_line(7);
-#ifdef SYNC_UI
-        ui_clear_line(1); ui_text(1, 1, C_GREY, "Backing up a cartridge");
+#ifdef COMPANION_UI
+        ui_clear_line(1); ui_text(1, 1, C_GREY, T_BACKING_UP);
 #endif
-        ui_text(3, 1, C_WHITE, "Game:"); ui_text(3, 7, C_CYAN, title);
-        ui_text(4, 1, C_WHITE, "Size:"); ui_dec(4, 7, C_CYAN, shown >> 20); ui_text(4, 7 + (shown >= (10u << 20) ? 2 : 1), C_CYAN, (size & ROM_SIZE_GUESSED) ? " MB?" : " MB");
+        ui_text(3, 1, C_WHITE, T_GAME); ui_text(3, 7, C_CYAN, title);
+        ui_text(4, 1, C_WHITE, T_SIZE); ui_dec(4, 7, C_CYAN, shown >> 20); ui_text(4, 7 + (shown >= (10u << 20) ? 2 : 1), C_CYAN, (size & ROM_SIZE_GUESSED) ? " MB?" : " MB");
         status_line(C_GREEN, T_INFO_DONE);
+        return ST_OK;
+    }
+    case CMD_RTC_READ: {
+        u8 st = 0, dt[8] = {0};
+        res[0] = (u32)rtc_get(&st, dt);
+        res[1] = st;
+        res[2] = dt[0] | dt[1] << 8 | dt[2] << 16 | (u32)dt[3] << 24;
+        res[3] = dt[4] | dt[5] << 8 | dt[6] << 16;
+        *nres = 4;
         return ST_OK;
     }
     case CMD_ROM_READ: {
         if (nargs < 2 || args[1] == 0 || args[1] > MAX_ROM_CHUNK || (args[1] & 3) || args[0] + args[1] > (1u << 25))
             return ST_BAD_COMMAND;
         u32 done = nargs >= 4 ? args[2] : 0, steps = nargs >= 4 ? args[3] : 0;
-        if (steps) progress(CMD_ROM_READ, "Copy", T_ROM_READ, done, steps);
+        if (steps) progress(CMD_ROM_READ, L_COPY, T_ROM_READ, done, steps);
         u32 ck = CK_INIT, n = args[1] / 4, first = args[0] / 4;
         u32 same = 1;
         for (u32 i = 0; i < n; i++) { u32 w = ROM32(first + i); block[1 + i] = w; ck = CK_STEP(ck, w); same &= w == block[1]; }
         block[0] = ck;
         res_ptr = block; *nres = same && n > 1 ? 2 : n + 1;   /* all one word (padding): just that word */
         if (steps) {
-            progress(CMD_ROM_READ, "Copy", T_ROM_READ, done + 1, steps);
+            progress(CMD_ROM_READ, L_COPY, T_ROM_READ, done + 1, steps);
             if (done + 1 >= steps) status_line(C_GREEN, T_ROM_DONE);
         }
         return ST_OK;
@@ -346,10 +455,10 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
             backup_save = 0;
             ui_clear_line(1); ui_text(1, 1, C_GREY, T_SUBTITLE);
             ui_clear_line(7);
-#ifdef SYNC_UI
-            if (nargs >= 2 && args[1]) ui_text(7, 1, C_GREY, "Hold SELECT for the menu");
+#ifdef COMPANION_UI
+            if (nargs >= 2 && args[1]) ui_text(7, 1, C_GREY, T_HOLD_SEL);
 #endif
-            status_line(C_CYAN, "GBA buttons control mGBA");
+            status_line(C_CYAN, T_CONTROL);
             break;
         case MSG_BACKUP_SAVE:
             backup_save = 1;
@@ -357,14 +466,21 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
         case MSG_BACKUP_STOPPED:
             backup_save = 0;
             ui_clear_line(7);
-            ui_text(7, 1, C_GREY, "Nothing was saved.");
-            status_line(C_YELLOW, "Backup stopped");
+            ui_text(7, 1, C_GREY, T_NOTHING);
+            status_line(C_YELLOW, T_BK_STOPPED);
             break;
+#ifdef COMPANION_UI
+        case MSG_LANG:                     /* the game's language: the screen again in it */
+            if (nargs >= 2) set_lang((char)args[1]);
+            draw_home();
+            status_line(C_GREEN, T_HELLO);
+            break;
+#endif
         case MSG_BACKUP_DONE:
             backup_save = 0;
             ui_clear_line(7);
-            ui_text(7, 1, C_GREY, "You can switch the GBA off.");
-            status_line(C_GREEN, "Backup finished");
+            ui_text(7, 1, C_GREY, T_SWITCH_OFF);
+            status_line(C_GREEN, T_BK_DONE);
             break;
         }
         return ST_OK;
@@ -374,7 +490,7 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
             if (status_active()) status_leave();
             draw_home();                       /* mGBA was closed: the helper's own screen */
             ui_clear_line(7);
-            status_line(C_GREEN, "mGBA closed");
+            status_line(C_GREEN, T_MGBA_CLOSED);
             return ST_OK;
         }
         return status_command(args, nargs, block, ndata);
@@ -394,6 +510,9 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
 
 int main(void)
 {
+#ifdef COMPANION_UI
+    set_lang(lang_marker[8]);
+#endif
     draw_home();
     status_line(C_YELLOW, T_WAITING);
     sio_init();

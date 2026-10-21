@@ -1,42 +1,45 @@
--- GB-Link controller and status screens for mGBA.
+-- GB-Link Companion: controller and status screens for mGBA.
 -- Written by GB-Link Companion. While you play:
 --  * the buttons on your real GBA control the game in mGBA (controller mode), or
 --  * the GBA shows live info from the Pokemon game running in mGBA (RNG state, the wild
 --    Pokemon, the trainer's team, where you are on the map).
--- Supported: Pokemon Ruby, Sapphire, Emerald, FireRed and LeafGreen (English, every revision).
+-- Supported: Pokemon Ruby, Sapphire, Emerald, FireRed and LeafGreen, every revision: English and
+-- German Ruby/Sapphire from pret's symbol files, the other languages from addresses GB-Link Companion
+-- finds in the ROM (OVERRIDE). The screens' text is in the game's language (TR).
 -- mGBA 0.11 / development builds load this automatically. On mGBA 0.10, load it each time with
 -- Tools > Scripting... > File > Load script...
-local PORT = 47187
+local PORT = __PORT__
 local sock, buf, added, wait, tries = nil, "", 0, 0, 0
 local mode = 0            -- what the GBA shows: 0 nothing, 1 RNG, 2 wild, 3 trainer, 4 map
 local cursor = nil        -- the map cursor's cell {x, y}, or nil (set by GB-Link Companion)
 local urgent = false      -- send the screen on the next frame (the cursor moved)
 local preview = false     -- show the place under the cursor as a picture (set by GB-Link Companion)
--- Pausing from the RNG screen (GB-Link Companion sends P commands): mGBA stops between frames,
--- steps a frame at a time, then goes on holding the buttons chosen for the first frames.
-local paused, steps, holdKeys, holdFrames = false, 0, 0, 0
 local quiet = 0           -- frames since the app last sent the GBA's buttons
-local HOLD_FRAMES = 6
+local fixSeed = true      -- give Pokemon Emerald (the original game) a random starting seed (app setting)
 
 ------------------------------------------------------------------------------- the game
 -- Addresses from the pret decompilations' symbol files (pokeruby, pokeemerald, pokefirered).
 -- For each header code + revision, the builds it can be (checked against the ROM in detect())
 local VERSIONS = {}
 local function add(key, t) VERSIONS[key] = VERSIONS[key] or {}; table.insert(VERSIONS[key], t) end
-add("AXVE0", { game = "RUBY", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F716C, abilityNames = 0x081FA248, natureNames = 0x083C1004, speciesInfo = 0x081FEC18, trainers = 0x081F04FC, classNames = 0x081F0208, mapEntries = 0x083E73C4, mapGroups = 0x08308588, frontPics = 0x081E8354, palettes = 0x081EA5B4, shinyPalettes = 0x081EB374, icons = 0x083BBD20, iconPalIdx = 0x083BC400, iconPals = 0x083BC5B8, rmTiles = 0x083E5DA0, rmTilemap = 0x083E6B04, rmPal = 0x083E5D60, rmCursor = 0x083E5AF0, rmCursorPal = 0x083E5AD0, rmHero = 0x083E5C40, rmHeroPal = 0x083E5C20, rmHeroine = 0x083E5CE0, rmHeroinePal = 0x083E5CC0, navDevTiles = 0x083E05F4, navDevMap = 0x083E0804, navDevPal = 0x083E05D4 })
-add("AXVE1", { game = "RUBY", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7184, abilityNames = 0x081FA260, natureNames = 0x083C1020, speciesInfo = 0x081FEC30, trainers = 0x081F0514, classNames = 0x081F0220, mapEntries = 0x083E73E0, mapGroups = 0x083085A0, frontPics = 0x081E836C, palettes = 0x081EA5CC, shinyPalettes = 0x081EB38C, icons = 0x083BBD3C, iconPalIdx = 0x083BC41C, iconPals = 0x083BC5D4, rmTiles = 0x083E5DBC, rmTilemap = 0x083E6B20, rmPal = 0x083E5D7C, rmCursor = 0x083E5B0C, rmCursorPal = 0x083E5AEC, rmHero = 0x083E5C5C, rmHeroPal = 0x083E5C3C, rmHeroine = 0x083E5CFC, rmHeroinePal = 0x083E5CDC, navDevTiles = 0x083E0610, navDevMap = 0x083E0820, navDevPal = 0x083E05F0 })
-add("AXVE2", { game = "RUBY", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7184, abilityNames = 0x081FA260, natureNames = 0x083C1020, speciesInfo = 0x081FEC30, trainers = 0x081F0514, classNames = 0x081F0220, mapEntries = 0x083E73E0, mapGroups = 0x083085A0, frontPics = 0x081E836C, palettes = 0x081EA5CC, shinyPalettes = 0x081EB38C, icons = 0x083BBD3C, iconPalIdx = 0x083BC41C, iconPals = 0x083BC5D4, rmTiles = 0x083E5DBC, rmTilemap = 0x083E6B20, rmPal = 0x083E5D7C, rmCursor = 0x083E5B0C, rmCursorPal = 0x083E5AEC, rmHero = 0x083E5C5C, rmHeroPal = 0x083E5C3C, rmHeroine = 0x083E5CFC, rmHeroinePal = 0x083E5CDC, navDevTiles = 0x083E0610, navDevMap = 0x083E0820, navDevPal = 0x083E05F0 })
-add("AXPE0", { game = "SAPPHIRE", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F70FC, abilityNames = 0x081FA1D8, natureNames = 0x083C105C, speciesInfo = 0x081FEBA8, trainers = 0x081F048C, classNames = 0x081F0198, mapEntries = 0x083E741C, mapGroups = 0x08308518, frontPics = 0x081E82E4, palettes = 0x081EA544, shinyPalettes = 0x081EB304, icons = 0x083BBD78, iconPalIdx = 0x083BC458, iconPals = 0x083BC610, rmTiles = 0x083E5DF8, rmTilemap = 0x083E6B5C, rmPal = 0x083E5DB8, rmCursor = 0x083E5B48, rmCursorPal = 0x083E5B28, rmHero = 0x083E5C98, rmHeroPal = 0x083E5C78, rmHeroine = 0x083E5D38, rmHeroinePal = 0x083E5D18, navDevTiles = 0x083E064C, navDevMap = 0x083E085C, navDevPal = 0x083E062C })
-add("AXPE1", { game = "SAPPHIRE", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7114, abilityNames = 0x081FA1F0, natureNames = 0x083C107C, speciesInfo = 0x081FEBC0, trainers = 0x081F04A4, classNames = 0x081F01B0, mapEntries = 0x083E743C, mapGroups = 0x08308530, frontPics = 0x081E82FC, palettes = 0x081EA55C, shinyPalettes = 0x081EB31C, icons = 0x083BBD98, iconPalIdx = 0x083BC478, iconPals = 0x083BC630, rmTiles = 0x083E5E18, rmTilemap = 0x083E6B7C, rmPal = 0x083E5DD8, rmCursor = 0x083E5B68, rmCursorPal = 0x083E5B48, rmHero = 0x083E5CB8, rmHeroPal = 0x083E5C98, rmHeroine = 0x083E5D58, rmHeroinePal = 0x083E5D38, navDevTiles = 0x083E066C, navDevMap = 0x083E087C, navDevPal = 0x083E064C })
-add("AXPE2", { game = "SAPPHIRE", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7114, abilityNames = 0x081FA1F0, natureNames = 0x083C107C, speciesInfo = 0x081FEBC0, trainers = 0x081F04A4, classNames = 0x081F01B0, mapEntries = 0x083E743C, mapGroups = 0x08308530, frontPics = 0x081E82FC, palettes = 0x081EA55C, shinyPalettes = 0x081EB31C, icons = 0x083BBD98, iconPalIdx = 0x083BC478, iconPals = 0x083BC630, rmTiles = 0x083E5E18, rmTilemap = 0x083E6B7C, rmPal = 0x083E5DD8, rmCursor = 0x083E5B68, rmCursorPal = 0x083E5B48, rmHero = 0x083E5CB8, rmHeroPal = 0x083E5C98, rmHeroine = 0x083E5D58, rmHeroinePal = 0x083E5D38, navDevTiles = 0x083E066C, navDevMap = 0x083E087C, navDevPal = 0x083E064C })
-add("BPEE0", { game = "EMERALD", rng = 0x03005D80, party = 0x020244EC, enemy = 0x02024744, sb1ptr = 0x03005D8C, sb2ptr = 0x03005D90, mapHeader = 0x02037318, main = 0x030022C0, battleType = 0x02022FEC, opponent = 0x02038BCA, battleMons = 0x02024084, battleStructPtr = 0x0202449C, partyIdx = 0x0202406E, speciesNames = 0x083185C8, abilityNames = 0x0831B6DB, natureNames = 0x0861CB50, speciesInfo = 0x083203CC, trainers = 0x08310030, classNames = 0x0830FCD4, mapEntries = 0x085A147C, mapGroups = 0x08486578, frontPics = 0x0830A18C, palettes = 0x08303678, shinyPalettes = 0x08304438, icons = 0x0857BCA8, iconPalIdx = 0x0857C388, iconPals = 0x0857C540, rmTiles = 0x0859F77C, rmTilemap = 0x085A04E0, rmPal = 0x0859F73C, rmCursor = 0x0859F60C, rmCursorPal = 0x0859F5EC, rmHero = 0x085A084C, rmHeroPal = 0x085A082C, rmHeroine = 0x085A08EC, rmHeroinePal = 0x085A08CC, navDotsTiles = 0x0861FC98, navDotsMap = 0x0861FCAC, navDotsPal = 0x0861FC78, navDevTiles = 0x0861FD6C, navDevMap = 0x0861FFF4, navDevPal = 0x0861FD4C })
-add("BPRE0", { game = "FIRERED", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245EE0, abilityNames = 0x0824FC40, natureNames = 0x08463E60, speciesInfo = 0x08254784, trainers = 0x0823EAC8, classNames = 0x0823E558, mapNames = 0x083F1CAC, seviiMapsecs = 0x083F1AA4, mapGroups = 0x083526A8, frontPics = 0x082350AC, palettes = 0x0823730C, shinyPalettes = 0x082380CC, icons = 0x083D37A0, iconPalIdx = 0x083D3E80, iconPals = 0x083D4038, rmTiles = 0x083EF61C, rmPal = 0x083EF2DC, rmKanto = 0x083F089C, rmSevii123 = 0x083F0AFC, rmSevii45 = 0x083F0C0C, rmSevii67 = 0x083F0CF0, rmCursor = 0x083EF4E0, rmCursorPal = 0x083EF25C, rmHero = 0x083EF524, rmHeroPal = 0x083EF27C, rmHeroine = 0x083EF59C, rmHeroinePal = 0x083EF29C, layoutKanto = 0x083F2490, layoutSevii123 = 0x083F2724, layoutSevii45 = 0x083F29B8, layoutSevii67 = 0x083F2C4C })
-add("BPRE1", { game = "FIRERED", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245F50, abilityNames = 0x0824FCB0, natureNames = 0x08463EC0, speciesInfo = 0x082547F4, trainers = 0x0823EB38, classNames = 0x0823E5C8, mapNames = 0x083F1D1C, seviiMapsecs = 0x083F1B14, mapGroups = 0x08352718, frontPics = 0x0823511C, palettes = 0x0823737C, shinyPalettes = 0x0823813C, icons = 0x083D3810, iconPalIdx = 0x083D3EF0, iconPals = 0x083D40A8, rmTiles = 0x083EF68C, rmPal = 0x083EF34C, rmKanto = 0x083F090C, rmSevii123 = 0x083F0B6C, rmSevii45 = 0x083F0C7C, rmSevii67 = 0x083F0D60, rmCursor = 0x083EF550, rmCursorPal = 0x083EF2CC, rmHero = 0x083EF594, rmHeroPal = 0x083EF2EC, rmHeroine = 0x083EF60C, rmHeroinePal = 0x083EF30C, layoutKanto = 0x083F2500, layoutSevii123 = 0x083F2794, layoutSevii45 = 0x083F2A28, layoutSevii67 = 0x083F2CBC })
-add("BPGE0", { game = "LEAFGREEN", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245EBC, abilityNames = 0x0824FC1C, natureNames = 0x08463880, speciesInfo = 0x08254760, trainers = 0x0823EAA4, classNames = 0x0823E534, mapNames = 0x083F1AE8, seviiMapsecs = 0x083F18E0, mapGroups = 0x08352688, frontPics = 0x08235088, palettes = 0x082372E8, shinyPalettes = 0x082380A8, icons = 0x083D35DC, iconPalIdx = 0x083D3CBC, iconPals = 0x083D3E74, rmTiles = 0x083EF458, rmPal = 0x083EF118, rmKanto = 0x083F06D8, rmSevii123 = 0x083F0938, rmSevii45 = 0x083F0A48, rmSevii67 = 0x083F0B2C, rmCursor = 0x083EF31C, rmCursorPal = 0x083EF098, rmHero = 0x083EF360, rmHeroPal = 0x083EF0B8, rmHeroine = 0x083EF3D8, rmHeroinePal = 0x083EF0D8, layoutKanto = 0x083F22CC, layoutSevii123 = 0x083F2560, layoutSevii45 = 0x083F27F4, layoutSevii67 = 0x083F2A88 })
-add("BPGE1", { game = "LEAFGREEN", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245F2C, abilityNames = 0x0824FC8C, natureNames = 0x084638F0, speciesInfo = 0x082547D0, trainers = 0x0823EB14, classNames = 0x0823E5A4, mapNames = 0x083F1B58, seviiMapsecs = 0x083F1950, mapGroups = 0x083526F8, frontPics = 0x082350F8, palettes = 0x08237358, shinyPalettes = 0x08238118, icons = 0x083D364C, iconPalIdx = 0x083D3D2C, iconPals = 0x083D3EE4, rmTiles = 0x083EF4C8, rmPal = 0x083EF188, rmKanto = 0x083F0748, rmSevii123 = 0x083F09A8, rmSevii45 = 0x083F0AB8, rmSevii67 = 0x083F0B9C, rmCursor = 0x083EF38C, rmCursorPal = 0x083EF108, rmHero = 0x083EF3D0, rmHeroPal = 0x083EF128, rmHeroine = 0x083EF448, rmHeroinePal = 0x083EF148, layoutKanto = 0x083F233C, layoutSevii123 = 0x083F25D0, layoutSevii45 = 0x083F2864, layoutSevii67 = 0x083F2AF8 })
-add("BPEE0", { game = "EMERALD", build = "QoL", custom = true, rng = 0x03005DA0, party = 0x020244EC, enemy = 0x02024744, sb1ptr = 0x03005DAC, sb2ptr = 0x03005DB0, mapHeader = 0x02037320, main = 0x030022E0, battleType = 0x02022FEC, opponent = 0x02038BD2, battleMons = 0x02024084, battleStructPtr = 0x0202449C, partyIdx = 0x0202406E, speciesNames = 0x0831B524, abilityNames = 0x0831E637, natureNames = 0x086202A4, speciesInfo = 0x08323548, trainers = 0x08312F8C, classNames = 0x08312C30, mapEntries = 0x085A47B8, mapGroups = 0x084896F4, frontPics = 0x0830D0E8, palettes = 0x083065D4, shinyPalettes = 0x08307394, icons = 0x0857EE5C, iconPalIdx = 0x0857F53C, iconPals = 0x0857F6F4, rmTiles = 0x085A2AB8, rmTilemap = 0x085A381C, rmPal = 0x085A2A78, rmCursor = 0x085A2948, rmCursorPal = 0x085A2928, rmHero = 0x085A3B88, rmHeroPal = 0x085A3B68, rmHeroine = 0x085A3C28, rmHeroinePal = 0x085A3C08, navDotsTiles = 0x08623408, navDotsMap = 0x0862341C, navDotsPal = 0x086233E8, navDevTiles = 0x086234DC, navDevMap = 0x08623764, navDevPal = 0x086234BC })
-add("BPRE1", { game = "FIRERED", build = "QoL", custom = true, rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08246038, abilityNames = 0x0824FD98, natureNames = 0x08463E70, speciesInfo = 0x082548DC, trainers = 0x0823EC20, classNames = 0x0823E6B0, mapNames = 0x083F1DDC, seviiMapsecs = 0x083F1BD4, mapGroups = 0x08352800, frontPics = 0x08235204, palettes = 0x08237464, shinyPalettes = 0x08238224, icons = 0x083D38D0, iconPalIdx = 0x083D3FB0, iconPals = 0x083D4168, rmTiles = 0x083EF74C, rmPal = 0x083EF40C, rmKanto = 0x083F09CC, rmSevii123 = 0x083F0C2C, rmSevii45 = 0x083F0D3C, rmSevii67 = 0x083F0E20, rmCursor = 0x083EF610, rmCursorPal = 0x083EF38C, rmHero = 0x083EF654, rmHeroPal = 0x083EF3AC, rmHeroine = 0x083EF6CC, rmHeroinePal = 0x083EF3CC, layoutKanto = 0x083F25C0, layoutSevii123 = 0x083F2854, layoutSevii45 = 0x083F2AE8, layoutSevii67 = 0x083F2D7C })
-add("BPGE1", { game = "LEAFGREEN", build = "QoL", custom = true, rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08246018, abilityNames = 0x0824FD78, natureNames = 0x084638A4, speciesInfo = 0x082548BC, trainers = 0x0823EC00, classNames = 0x0823E690, mapNames = 0x083F1C1C, seviiMapsecs = 0x083F1A14, mapGroups = 0x083527E4, frontPics = 0x082351E4, palettes = 0x08237444, shinyPalettes = 0x08238204, icons = 0x083D3710, iconPalIdx = 0x083D3DF0, iconPals = 0x083D3FA8, rmTiles = 0x083EF58C, rmPal = 0x083EF24C, rmKanto = 0x083F080C, rmSevii123 = 0x083F0A6C, rmSevii45 = 0x083F0B7C, rmSevii67 = 0x083F0C60, rmCursor = 0x083EF450, rmCursorPal = 0x083EF1CC, rmHero = 0x083EF494, rmHeroPal = 0x083EF1EC, rmHeroine = 0x083EF50C, rmHeroinePal = 0x083EF20C, layoutKanto = 0x083F2400, layoutSevii123 = 0x083F2694, layoutSevii45 = 0x083F2928, layoutSevii67 = 0x083F2BBC })
+add("AXVE0", { game = "RUBY", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F716C, abilityNames = 0x081FA248, natureNames = 0x083C1004, speciesInfo = 0x081FEC18, trainers = 0x081F04FC, classNames = 0x081F0208, mapEntries = 0x083E73C4, mapGroups = 0x08308588, frontPics = 0x081E8354, palettes = 0x081EA5B4, shinyPalettes = 0x081EB374, icons = 0x083BBD20, iconPalIdx = 0x083BC400, iconPals = 0x083BC5B8, rmTiles = 0x083E5DA0, rmTilemap = 0x083E6B04, rmPal = 0x083E5D60, rmCursor = 0x083E5AF0, rmCursorPal = 0x083E5AD0, rmHero = 0x083E5C40, rmHeroPal = 0x083E5C20, rmHeroine = 0x083E5CE0, rmHeroinePal = 0x083E5CC0, navDevTiles = 0x083E05F4, navDevMap = 0x083E0804, navDevPal = 0x083E05D4, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814AE30, cmdTableEnd = 0x0814B148, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054350, cb2Overworld = 0x080543A4 })
+add("AXVE1", { game = "RUBY", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7184, abilityNames = 0x081FA260, natureNames = 0x083C1020, speciesInfo = 0x081FEC30, trainers = 0x081F0514, classNames = 0x081F0220, mapEntries = 0x083E73E0, mapGroups = 0x083085A0, frontPics = 0x081E836C, palettes = 0x081EA5CC, shinyPalettes = 0x081EB38C, icons = 0x083BBD3C, iconPalIdx = 0x083BC41C, iconPals = 0x083BC5D4, rmTiles = 0x083E5DBC, rmTilemap = 0x083E6B20, rmPal = 0x083E5D7C, rmCursor = 0x083E5B0C, rmCursorPal = 0x083E5AEC, rmHero = 0x083E5C5C, rmHeroPal = 0x083E5C3C, rmHeroine = 0x083E5CFC, rmHeroinePal = 0x083E5CDC, navDevTiles = 0x083E0610, navDevMap = 0x083E0820, navDevPal = 0x083E05F0, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814AE50, cmdTableEnd = 0x0814B168, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054370, cb2Overworld = 0x080543C4 })
+add("AXVE2", { game = "RUBY", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7184, abilityNames = 0x081FA260, natureNames = 0x083C1020, speciesInfo = 0x081FEC30, trainers = 0x081F0514, classNames = 0x081F0220, mapEntries = 0x083E73E0, mapGroups = 0x083085A0, frontPics = 0x081E836C, palettes = 0x081EA5CC, shinyPalettes = 0x081EB38C, icons = 0x083BBD3C, iconPalIdx = 0x083BC41C, iconPals = 0x083BC5D4, rmTiles = 0x083E5DBC, rmTilemap = 0x083E6B20, rmPal = 0x083E5D7C, rmCursor = 0x083E5B0C, rmCursorPal = 0x083E5AEC, rmHero = 0x083E5C5C, rmHeroPal = 0x083E5C3C, rmHeroine = 0x083E5CFC, rmHeroinePal = 0x083E5CDC, navDevTiles = 0x083E0610, navDevMap = 0x083E0820, navDevPal = 0x083E05F0, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814AE50, cmdTableEnd = 0x0814B168, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054370, cb2Overworld = 0x080543C4 })
+add("AXPE0", { game = "SAPPHIRE", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F70FC, abilityNames = 0x081FA1D8, natureNames = 0x083C105C, speciesInfo = 0x081FEBA8, trainers = 0x081F048C, classNames = 0x081F0198, mapEntries = 0x083E741C, mapGroups = 0x08308518, frontPics = 0x081E82E4, palettes = 0x081EA544, shinyPalettes = 0x081EB304, icons = 0x083BBD78, iconPalIdx = 0x083BC458, iconPals = 0x083BC610, rmTiles = 0x083E5DF8, rmTilemap = 0x083E6B5C, rmPal = 0x083E5DB8, rmCursor = 0x083E5B48, rmCursorPal = 0x083E5B28, rmHero = 0x083E5C98, rmHeroPal = 0x083E5C78, rmHeroine = 0x083E5D38, rmHeroinePal = 0x083E5D18, navDevTiles = 0x083E064C, navDevMap = 0x083E085C, navDevPal = 0x083E062C, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814AE30, cmdTableEnd = 0x0814B148, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054354, cb2Overworld = 0x080543A8 })
+add("AXPE1", { game = "SAPPHIRE", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7114, abilityNames = 0x081FA1F0, natureNames = 0x083C107C, speciesInfo = 0x081FEBC0, trainers = 0x081F04A4, classNames = 0x081F01B0, mapEntries = 0x083E743C, mapGroups = 0x08308530, frontPics = 0x081E82FC, palettes = 0x081EA55C, shinyPalettes = 0x081EB31C, icons = 0x083BBD98, iconPalIdx = 0x083BC478, iconPals = 0x083BC630, rmTiles = 0x083E5E18, rmTilemap = 0x083E6B7C, rmPal = 0x083E5DD8, rmCursor = 0x083E5B68, rmCursorPal = 0x083E5B48, rmHero = 0x083E5CB8, rmHeroPal = 0x083E5C98, rmHeroine = 0x083E5D58, rmHeroinePal = 0x083E5D38, navDevTiles = 0x083E066C, navDevMap = 0x083E087C, navDevPal = 0x083E064C, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814AE50, cmdTableEnd = 0x0814B168, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054374, cb2Overworld = 0x080543C8 })
+add("AXPE2", { game = "SAPPHIRE", rng = 0x03004818, party = 0x03004360, enemy = 0x030045C0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x081F7114, abilityNames = 0x081FA1F0, natureNames = 0x083C107C, speciesInfo = 0x081FEBC0, trainers = 0x081F04A4, classNames = 0x081F01B0, mapEntries = 0x083E743C, mapGroups = 0x08308530, frontPics = 0x081E82FC, palettes = 0x081EA55C, shinyPalettes = 0x081EB31C, icons = 0x083BBD98, iconPalIdx = 0x083BC478, iconPals = 0x083BC630, rmTiles = 0x083E5E18, rmTilemap = 0x083E6B7C, rmPal = 0x083E5DD8, rmCursor = 0x083E5B68, rmCursorPal = 0x083E5B48, rmHero = 0x083E5CB8, rmHeroPal = 0x083E5C98, rmHeroine = 0x083E5D58, rmHeroinePal = 0x083E5D38, navDevTiles = 0x083E066C, navDevMap = 0x083E087C, navDevPal = 0x083E064C, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814AE50, cmdTableEnd = 0x0814B168, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054374, cb2Overworld = 0x080543C8 })
+add("BPEE0", { game = "EMERALD", rng = 0x03005D80, party = 0x020244EC, enemy = 0x02024744, sb1ptr = 0x03005D8C, sb2ptr = 0x03005D90, mapHeader = 0x02037318, main = 0x030022C0, battleType = 0x02022FEC, opponent = 0x02038BCA, battleMons = 0x02024084, battleStructPtr = 0x0202449C, partyIdx = 0x0202406E, speciesNames = 0x083185C8, abilityNames = 0x0831B6DB, natureNames = 0x0861CB50, speciesInfo = 0x083203CC, trainers = 0x08310030, classNames = 0x0830FCD4, mapEntries = 0x085A147C, mapGroups = 0x08486578, frontPics = 0x0830A18C, palettes = 0x08303678, shinyPalettes = 0x08304438, icons = 0x0857BCA8, iconPalIdx = 0x0857C388, iconPals = 0x0857C540, rmTiles = 0x0859F77C, rmTilemap = 0x085A04E0, rmPal = 0x0859F73C, rmCursor = 0x0859F60C, rmCursorPal = 0x0859F5EC, rmHero = 0x085A084C, rmHeroPal = 0x085A082C, rmHeroine = 0x085A08EC, rmHeroinePal = 0x085A08CC, navDotsTiles = 0x0861FC98, navDotsMap = 0x0861FCAC, navDotsPal = 0x0861FC78, navDevTiles = 0x0861FD6C, navDevMap = 0x0861FFF4, navDevPal = 0x0861FD4C, scriptCtx = 0x03000E40, scriptStatus = 0x03000E38, lockControls = 0x03000F2C, cmdTable = 0x081DB67C, cmdTableEnd = 0x081DBA08, ramScriptRet = 0x020375C0, intrTable = 0x03002710, cb1Overworld = 0x08085E04, cb2Overworld = 0x08085E5C })
+add("AXVD0", { game = "RUBY", lang = "D", rng = 0x03004828, party = 0x03004370, enemy = 0x030045D0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x082040E8, abilityNames = 0x08207218, natureNames = 0x083CCF9C, speciesInfo = 0x0820BBE8, trainers = 0x081FD478, classNames = 0x081FD184, mapEntries = 0x083F3770, mapGroups = 0x08313D70, frontPics = 0x081F52D0, palettes = 0x081F7530, shinyPalettes = 0x081F82F0, icons = 0x083C7C30, iconPalIdx = 0x083C8310, iconPals = 0x083C84C8, rmTiles = 0x083F2178, rmTilemap = 0x083F2EDC, rmPal = 0x083F2138, rmCursor = 0x083F1EC8, rmCursorPal = 0x083F1EA8, rmHero = 0x083F2018, rmHeroPal = 0x083F1FF8, rmHeroine = 0x083F20B8, rmHeroinePal = 0x083F2098, navDevTiles = 0x083EC948, navDevMap = 0x083ECB58, navDevPal = 0x083EC928, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814B204, cmdTableEnd = 0x0814B51C, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054690, cb2Overworld = 0x080546E4 })
+add("AXVD1", { game = "RUBY", lang = "D", rng = 0x03004828, party = 0x03004370, enemy = 0x030045D0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x082040E8, abilityNames = 0x08207218, natureNames = 0x083CCF9C, speciesInfo = 0x0820BBE8, trainers = 0x081FD478, classNames = 0x081FD184, mapEntries = 0x083F3770, mapGroups = 0x08313D70, frontPics = 0x081F52D0, palettes = 0x081F7530, shinyPalettes = 0x081F82F0, icons = 0x083C7C30, iconPalIdx = 0x083C8310, iconPals = 0x083C84C8, rmTiles = 0x083F2178, rmTilemap = 0x083F2EDC, rmPal = 0x083F2138, rmCursor = 0x083F1EC8, rmCursorPal = 0x083F1EA8, rmHero = 0x083F2018, rmHeroPal = 0x083F1FF8, rmHeroine = 0x083F20B8, rmHeroinePal = 0x083F2098, navDevTiles = 0x083EC948, navDevMap = 0x083ECB58, navDevPal = 0x083EC928, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814B204, cmdTableEnd = 0x0814B51C, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054690, cb2Overworld = 0x080546E4 })
+add("AXPD0", { game = "SAPPHIRE", lang = "D", rng = 0x03004828, party = 0x03004370, enemy = 0x030045D0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x0820407C, abilityNames = 0x082071AC, natureNames = 0x083CCF08, speciesInfo = 0x0820BB7C, trainers = 0x081FD40C, classNames = 0x081FD118, mapEntries = 0x083F36DC, mapGroups = 0x08313D04, frontPics = 0x081F5264, palettes = 0x081F74C4, shinyPalettes = 0x081F8284, icons = 0x083C7B9C, iconPalIdx = 0x083C827C, iconPals = 0x083C8434, rmTiles = 0x083F20E4, rmTilemap = 0x083F2E48, rmPal = 0x083F20A4, rmCursor = 0x083F1E34, rmCursorPal = 0x083F1E14, rmHero = 0x083F1F84, rmHeroPal = 0x083F1F64, rmHeroine = 0x083F2024, rmHeroinePal = 0x083F2004, navDevTiles = 0x083EC8B4, navDevMap = 0x083ECAC4, navDevPal = 0x083EC894, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814B208, cmdTableEnd = 0x0814B520, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054694, cb2Overworld = 0x080546E8 })
+add("AXPD1", { game = "SAPPHIRE", lang = "D", rng = 0x03004828, party = 0x03004370, enemy = 0x030045D0, sb1 = 0x02025734, sb2 = 0x02024EA4, mapHeader = 0x0202E828, main = 0x03001770, battleType = 0x020239F8, opponent = 0x0202FF5E, battleMons = 0x02024A80, partyIdx = 0x02024A6A, speciesNames = 0x0820407C, abilityNames = 0x082071AC, natureNames = 0x083CCF08, speciesInfo = 0x0820BB7C, trainers = 0x081FD40C, classNames = 0x081FD118, mapEntries = 0x083F36DC, mapGroups = 0x08313D04, frontPics = 0x081F5264, palettes = 0x081F74C4, shinyPalettes = 0x081F8284, icons = 0x083C7B9C, iconPalIdx = 0x083C827C, iconPals = 0x083C8434, rmTiles = 0x083F20E4, rmTilemap = 0x083F2E48, rmPal = 0x083F20A4, rmCursor = 0x083F1E34, rmCursorPal = 0x083F1E14, rmHero = 0x083F1F84, rmHeroPal = 0x083F1F64, rmHeroine = 0x083F2024, rmHeroinePal = 0x083F2004, navDevTiles = 0x083EC8B4, navDevMap = 0x083ECAC4, navDevPal = 0x083EC894, scriptCtx = 0x030005B8, scriptStatus = 0x030005B0, lockControls = 0x030006A4, cmdTable = 0x0814B208, cmdTableEnd = 0x0814B520, ramScriptRet = 0x0202E8AC, intrTable = 0x03001BC0, cb1Overworld = 0x08054694, cb2Overworld = 0x080546E8 })
+add("BPRE0", { game = "FIRERED", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245EE0, abilityNames = 0x0824FC40, natureNames = 0x08463E60, speciesInfo = 0x08254784, trainers = 0x0823EAC8, classNames = 0x0823E558, mapNames = 0x083F1CAC, seviiMapsecs = 0x083F1AA4, mapGroups = 0x083526A8, frontPics = 0x082350AC, palettes = 0x0823730C, shinyPalettes = 0x082380CC, icons = 0x083D37A0, iconPalIdx = 0x083D3E80, iconPals = 0x083D4038, rmTiles = 0x083EF61C, rmPal = 0x083EF2DC, rmKanto = 0x083F089C, rmSevii123 = 0x083F0AFC, rmSevii45 = 0x083F0C0C, rmSevii67 = 0x083F0CF0, rmCursor = 0x083EF4E0, rmCursorPal = 0x083EF25C, rmHero = 0x083EF524, rmHeroPal = 0x083EF27C, rmHeroine = 0x083EF59C, rmHeroinePal = 0x083EF29C, layoutKanto = 0x083F2490, layoutSevii123 = 0x083F2724, layoutSevii45 = 0x083F29B8, layoutSevii67 = 0x083F2C4C, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815F9B4, cmdTableEnd = 0x0815FD08, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x08056534, cb2Overworld = 0x080565B4 })
+add("BPRE1", { game = "FIRERED", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245F50, abilityNames = 0x0824FCB0, natureNames = 0x08463EC0, speciesInfo = 0x082547F4, trainers = 0x0823EB38, classNames = 0x0823E5C8, mapNames = 0x083F1D1C, seviiMapsecs = 0x083F1B14, mapGroups = 0x08352718, frontPics = 0x0823511C, palettes = 0x0823737C, shinyPalettes = 0x0823813C, icons = 0x083D3810, iconPalIdx = 0x083D3EF0, iconPals = 0x083D40A8, rmTiles = 0x083EF68C, rmPal = 0x083EF34C, rmKanto = 0x083F090C, rmSevii123 = 0x083F0B6C, rmSevii45 = 0x083F0C7C, rmSevii67 = 0x083F0D60, rmCursor = 0x083EF550, rmCursorPal = 0x083EF2CC, rmHero = 0x083EF594, rmHeroPal = 0x083EF2EC, rmHeroine = 0x083EF60C, rmHeroinePal = 0x083EF30C, layoutKanto = 0x083F2500, layoutSevii123 = 0x083F2794, layoutSevii45 = 0x083F2A28, layoutSevii67 = 0x083F2CBC, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815FA2C, cmdTableEnd = 0x0815FD80, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x08056548, cb2Overworld = 0x080565C8 })
+add("BPGE0", { game = "LEAFGREEN", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245EBC, abilityNames = 0x0824FC1C, natureNames = 0x08463880, speciesInfo = 0x08254760, trainers = 0x0823EAA4, classNames = 0x0823E534, mapNames = 0x083F1AE8, seviiMapsecs = 0x083F18E0, mapGroups = 0x08352688, frontPics = 0x08235088, palettes = 0x082372E8, shinyPalettes = 0x082380A8, icons = 0x083D35DC, iconPalIdx = 0x083D3CBC, iconPals = 0x083D3E74, rmTiles = 0x083EF458, rmPal = 0x083EF118, rmKanto = 0x083F06D8, rmSevii123 = 0x083F0938, rmSevii45 = 0x083F0A48, rmSevii67 = 0x083F0B2C, rmCursor = 0x083EF31C, rmCursorPal = 0x083EF098, rmHero = 0x083EF360, rmHeroPal = 0x083EF0B8, rmHeroine = 0x083EF3D8, rmHeroinePal = 0x083EF0D8, layoutKanto = 0x083F22CC, layoutSevii123 = 0x083F2560, layoutSevii45 = 0x083F27F4, layoutSevii67 = 0x083F2A88, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815F990, cmdTableEnd = 0x0815FCE4, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x08056534, cb2Overworld = 0x080565B4 })
+add("BPGE1", { game = "LEAFGREEN", rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08245F2C, abilityNames = 0x0824FC8C, natureNames = 0x084638F0, speciesInfo = 0x082547D0, trainers = 0x0823EB14, classNames = 0x0823E5A4, mapNames = 0x083F1B58, seviiMapsecs = 0x083F1950, mapGroups = 0x083526F8, frontPics = 0x082350F8, palettes = 0x08237358, shinyPalettes = 0x08238118, icons = 0x083D364C, iconPalIdx = 0x083D3D2C, iconPals = 0x083D3EE4, rmTiles = 0x083EF4C8, rmPal = 0x083EF188, rmKanto = 0x083F0748, rmSevii123 = 0x083F09A8, rmSevii45 = 0x083F0AB8, rmSevii67 = 0x083F0B9C, rmCursor = 0x083EF38C, rmCursorPal = 0x083EF108, rmHero = 0x083EF3D0, rmHeroPal = 0x083EF128, rmHeroine = 0x083EF448, rmHeroinePal = 0x083EF148, layoutKanto = 0x083F233C, layoutSevii123 = 0x083F25D0, layoutSevii45 = 0x083F2864, layoutSevii67 = 0x083F2AF8, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815FA08, cmdTableEnd = 0x0815FD5C, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x08056548, cb2Overworld = 0x080565C8 })
+add("BPEE0", { game = "EMERALD", build = "QoL", custom = true, rng = 0x03005DA0, party = 0x020244EC, enemy = 0x02024744, sb1ptr = 0x03005DAC, sb2ptr = 0x03005DB0, mapHeader = 0x02037320, main = 0x030022E0, battleType = 0x02022FEC, opponent = 0x02038BD2, battleMons = 0x02024084, battleStructPtr = 0x0202449C, partyIdx = 0x0202406E, speciesNames = 0x0831B524, abilityNames = 0x0831E637, natureNames = 0x086202A4, speciesInfo = 0x08323548, trainers = 0x08312F8C, classNames = 0x08312C30, mapEntries = 0x085A47B8, mapGroups = 0x084896F4, frontPics = 0x0830D0E8, palettes = 0x083065D4, shinyPalettes = 0x08307394, icons = 0x0857EE5C, iconPalIdx = 0x0857F53C, iconPals = 0x0857F6F4, rmTiles = 0x085A2AB8, rmTilemap = 0x085A381C, rmPal = 0x085A2A78, rmCursor = 0x085A2948, rmCursorPal = 0x085A2928, rmHero = 0x085A3B88, rmHeroPal = 0x085A3B68, rmHeroine = 0x085A3C28, rmHeroinePal = 0x085A3C08, navDotsTiles = 0x08623408, navDotsMap = 0x0862341C, navDotsPal = 0x086233E8, navDevTiles = 0x086234DC, navDevMap = 0x08623764, navDevPal = 0x086234BC, scriptCtx = 0x03000E48, scriptStatus = 0x03000E40, lockControls = 0x03000F34, cmdTable = 0x081DE000, cmdTableEnd = 0x081DE38C, ramScriptRet = 0x020375C8, intrTable = 0x03002730, cb1Overworld = 0x080865D4, cb2Overworld = 0x0808662C })
+add("BPRE1", { game = "FIRERED", build = "QoL", custom = true, rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08246038, abilityNames = 0x0824FD98, natureNames = 0x08463E70, speciesInfo = 0x082548DC, trainers = 0x0823EC20, classNames = 0x0823E6B0, mapNames = 0x083F1DDC, seviiMapsecs = 0x083F1BD4, mapGroups = 0x08352800, frontPics = 0x08235204, palettes = 0x08237464, shinyPalettes = 0x08238224, icons = 0x083D38D0, iconPalIdx = 0x083D3FB0, iconPals = 0x083D4168, rmTiles = 0x083EF74C, rmPal = 0x083EF40C, rmKanto = 0x083F09CC, rmSevii123 = 0x083F0C2C, rmSevii45 = 0x083F0D3C, rmSevii67 = 0x083F0E20, rmCursor = 0x083EF610, rmCursorPal = 0x083EF38C, rmHero = 0x083EF654, rmHeroPal = 0x083EF3AC, rmHeroine = 0x083EF6CC, rmHeroinePal = 0x083EF3CC, layoutKanto = 0x083F25C0, layoutSevii123 = 0x083F2854, layoutSevii45 = 0x083F2AE8, layoutSevii67 = 0x083F2D7C, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815FA88, cmdTableEnd = 0x0815FDDC, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x0805687C, cb2Overworld = 0x080568FC })
+add("BPGE1", { game = "LEAFGREEN", build = "QoL", custom = true, rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08246018, abilityNames = 0x0824FD78, natureNames = 0x084638A4, speciesInfo = 0x082548BC, trainers = 0x0823EC00, classNames = 0x0823E690, mapNames = 0x083F1C1C, seviiMapsecs = 0x083F1A14, mapGroups = 0x083527E4, frontPics = 0x082351E4, palettes = 0x08237444, shinyPalettes = 0x08238204, icons = 0x083D3710, iconPalIdx = 0x083D3DF0, iconPals = 0x083D3FA8, rmTiles = 0x083EF58C, rmPal = 0x083EF24C, rmKanto = 0x083F080C, rmSevii123 = 0x083F0A6C, rmSevii45 = 0x083F0B7C, rmSevii67 = 0x083F0C60, rmCursor = 0x083EF450, rmCursorPal = 0x083EF1CC, rmHero = 0x083EF494, rmHeroPal = 0x083EF1EC, rmHeroine = 0x083EF50C, rmHeroinePal = 0x083EF20C, layoutKanto = 0x083F2400, layoutSevii123 = 0x083F2694, layoutSevii45 = 0x083F2928, layoutSevii67 = 0x083F2BBC, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815FA68, cmdTableEnd = 0x0815FDBC, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x0805687C, cb2Overworld = 0x080568FC })
 
 -- The addresses of your own build, from a .sym file next to the ROM (filled in by GB-Link Companion)
 --@OVERRIDE@
@@ -55,34 +58,74 @@ local KANTO_MAPSEC_START = 0x58
 local V, F, gameName = nil, nil, nil     -- this game's addresses, family, and name for the screen
 local unsupported = nil                  -- why the status screens can't work with this game
 
+-- The screens' text in the game's language: GB-Link Companion puts in the table for it.
+--@LANG@
+local TRANSLATIONS = TR or {}
+local function tr(s) return TRANSLATIONS[s] or s end
+
 local function r8(a) return emu:read8(a) end
 local function r16(a) return emu:read16(a) end
 local function r32(a) return emu:read32(a) end
 
--- the games' English character set
-local CHARS = {}
-do
-  local function span(first, s) for i = 1, #s do CHARS[first + i - 1] = s:sub(i, i) end end
-  CHARS[0x00] = " "
-  span(0xA1, "0123456789!?.-")
-  span(0xB1, "\"\"''MF,")          -- B5/B6 are the male/female signs: shown as M / F
-  CHARS[0xB0] = "..."
-  CHARS[0xB8] = ","
-  CHARS[0xBA] = "/"
-  span(0xBB, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
-  CHARS[0xF0] = ":"
-  CHARS[0x1B] = "e"                -- e acute (POKEMON)
-  CHARS[0x5C] = "("
-  CHARS[0x5D] = ")"
-  CHARS[0x2D] = "&"
-  CHARS[0x34] = "Lv"
-  CHARS[0x35] = "="
-  CHARS[0x53] = "PK"
-  CHARS[0x54] = "MN"
-end
+-- The games' character sets (from pret's charmap.txt): the international games' (with accents), and
+-- the Japanese games' (kana below 0xA1). Symbols the GBA's fonts lack are shown as plain stand-ins.
+local CHARSET_INTL = {
+  [0x00]=" ", [0x01]="À", [0x02]="Á", [0x03]="Â", [0x04]="Ç", [0x05]="È", [0x06]="É", [0x07]="Ê",
+  [0x08]="Ë", [0x09]="Ì", [0x0B]="Î", [0x0C]="Ï", [0x0D]="Ò", [0x0E]="Ó", [0x0F]="Ô", [0x10]="OE",
+  [0x11]="Ù", [0x12]="Ú", [0x13]="Û", [0x14]="Ñ", [0x15]="ß", [0x16]="à", [0x17]="á", [0x19]="ç",
+  [0x1A]="è", [0x1B]="é", [0x1C]="ê", [0x1D]="ë", [0x1E]="ì", [0x20]="î", [0x21]="ï", [0x22]="ò",
+  [0x23]="ó", [0x24]="ô", [0x25]="oe", [0x26]="ù", [0x27]="ú", [0x28]="û", [0x29]="ñ", [0x2A]="º",
+  [0x2B]="ª", [0x2D]="&", [0x2E]="+", [0x34]="Lv", [0x35]="=", [0x36]=";", [0x51]="¿", [0x52]="¡",
+  [0x53]="PK", [0x54]="MN", [0x5A]="Í", [0x5B]="%", [0x5C]="(", [0x5D]=")", [0x68]="â", [0x6F]="í",
+  [0x85]="<", [0x86]=">", [0xA1]="0", [0xA2]="1", [0xA3]="2", [0xA4]="3", [0xA5]="4", [0xA6]="5",
+  [0xA7]="6", [0xA8]="7", [0xA9]="8", [0xAA]="9", [0xAB]="!", [0xAC]="?", [0xAD]=".", [0xAE]="-",
+  [0xAF]="·", [0xB0]="...", [0xB1]="\"", [0xB2]="\"", [0xB3]="'", [0xB4]="'", [0xB5]="M", [0xB6]="F",
+  [0xB7]="¥", [0xB8]=",", [0xB9]="×", [0xBA]="/", [0xBB]="A", [0xBC]="B", [0xBD]="C", [0xBE]="D",
+  [0xBF]="E", [0xC0]="F", [0xC1]="G", [0xC2]="H", [0xC3]="I", [0xC4]="J", [0xC5]="K", [0xC6]="L",
+  [0xC7]="M", [0xC8]="N", [0xC9]="O", [0xCA]="P", [0xCB]="Q", [0xCC]="R", [0xCD]="S", [0xCE]="T",
+  [0xCF]="U", [0xD0]="V", [0xD1]="W", [0xD2]="X", [0xD3]="Y", [0xD4]="Z", [0xD5]="a", [0xD6]="b",
+  [0xD7]="c", [0xD8]="d", [0xD9]="e", [0xDA]="f", [0xDB]="g", [0xDC]="h", [0xDD]="i", [0xDE]="j",
+  [0xDF]="k", [0xE0]="l", [0xE1]="m", [0xE2]="n", [0xE3]="o", [0xE4]="p", [0xE5]="q", [0xE6]="r",
+  [0xE7]="s", [0xE8]="t", [0xE9]="u", [0xEA]="v", [0xEB]="w", [0xEC]="x", [0xED]="y", [0xEE]="z",
+  [0xEF]=">", [0xF0]=":", [0xF1]="Ä", [0xF2]="Ö", [0xF3]="Ü", [0xF4]="ä", [0xF5]="ö", [0xF6]="ü",
+}
+local CHARSET_JP = {
+  [0x00]="  ", [0x01]="あ", [0x02]="い", [0x03]="う", [0x04]="え", [0x05]="お", [0x06]="か", [0x07]="き",
+  [0x08]="く", [0x09]="け", [0x0A]="こ", [0x0B]="さ", [0x0C]="し", [0x0D]="す", [0x0E]="せ", [0x0F]="そ",
+  [0x10]="た", [0x11]="ち", [0x12]="つ", [0x13]="て", [0x14]="と", [0x15]="な", [0x16]="に", [0x17]="ぬ",
+  [0x18]="ね", [0x19]="の", [0x1A]="は", [0x1B]="ひ", [0x1C]="ふ", [0x1D]="へ", [0x1E]="ほ", [0x1F]="ま",
+  [0x20]="み", [0x21]="む", [0x22]="め", [0x23]="も", [0x24]="や", [0x25]="ゆ", [0x26]="よ", [0x27]="ら",
+  [0x28]="り", [0x29]="る", [0x2A]="れ", [0x2B]="ろ", [0x2C]="わ", [0x2D]="を", [0x2E]="ん", [0x2F]="ぁ",
+  [0x30]="ぃ", [0x31]="ぅ", [0x32]="ぇ", [0x33]="ぉ", [0x34]="ゃ", [0x35]="ゅ", [0x36]="ょ", [0x37]="が",
+  [0x38]="ぎ", [0x39]="ぐ", [0x3A]="げ", [0x3B]="ご", [0x3C]="ざ", [0x3D]="じ", [0x3E]="ず", [0x3F]="ぜ",
+  [0x40]="ぞ", [0x41]="だ", [0x42]="ぢ", [0x43]="づ", [0x44]="で", [0x45]="ど", [0x46]="ば", [0x47]="び",
+  [0x48]="ぶ", [0x49]="べ", [0x4A]="ぼ", [0x4B]="ぱ", [0x4C]="ぴ", [0x4D]="ぷ", [0x4E]="ぺ", [0x4F]="ぽ",
+  [0x50]="っ", [0x51]="ア", [0x52]="イ", [0x53]="ウ", [0x54]="エ", [0x55]="オ", [0x56]="カ", [0x57]="キ",
+  [0x58]="ク", [0x59]="ケ", [0x5A]="コ", [0x5B]="サ", [0x5C]="シ", [0x5D]="ス", [0x5E]="セ", [0x5F]="ソ",
+  [0x60]="タ", [0x61]="チ", [0x62]="ツ", [0x63]="テ", [0x64]="ト", [0x65]="ナ", [0x66]="ニ", [0x67]="ヌ",
+  [0x68]="ネ", [0x69]="ノ", [0x6A]="ハ", [0x6B]="ヒ", [0x6C]="フ", [0x6D]="ヘ", [0x6E]="ホ", [0x6F]="マ",
+  [0x70]="ミ", [0x71]="ム", [0x72]="メ", [0x73]="モ", [0x74]="ヤ", [0x75]="ユ", [0x76]="ヨ", [0x77]="ラ",
+  [0x78]="リ", [0x79]="ル", [0x7A]="レ", [0x7B]="ロ", [0x7C]="ワ", [0x7D]="ヲ", [0x7E]="ン", [0x7F]="ァ",
+  [0x80]="ィ", [0x81]="ゥ", [0x82]="ェ", [0x83]="ォ", [0x84]="ャ", [0x85]="ュ", [0x86]="ョ", [0x87]="ガ",
+  [0x88]="ギ", [0x89]="グ", [0x8A]="ゲ", [0x8B]="ゴ", [0x8C]="ザ", [0x8D]="ジ", [0x8E]="ズ", [0x8F]="ゼ",
+  [0x90]="ゾ", [0x91]="ダ", [0x92]="ヂ", [0x93]="ヅ", [0x94]="デ", [0x95]="ド", [0x96]="バ", [0x97]="ビ",
+  [0x98]="ブ", [0x99]="ベ", [0x9A]="ボ", [0x9B]="パ", [0x9C]="ピ", [0x9D]="プ", [0x9E]="ペ", [0x9F]="ポ",
+  [0xA0]="ッ", [0xA1]="0", [0xA2]="1", [0xA3]="2", [0xA4]="3", [0xA5]="4", [0xA6]="5", [0xA7]="6",
+  [0xA8]="7", [0xA9]="8", [0xAA]="9", [0xAB]="!", [0xAC]="?", [0xAD]=".", [0xAE]="ー", [0xAF]="·",
+  [0xB0]="...", [0xB1]="\"", [0xB2]="\"", [0xB3]="'", [0xB4]="'", [0xB5]="M", [0xB6]="F", [0xB7]="¥",
+  [0xB8]=",", [0xB9]="×", [0xBA]="/", [0xBB]="A", [0xBC]="B", [0xBD]="C", [0xBE]="D", [0xBF]="E",
+  [0xC0]="F", [0xC1]="G", [0xC2]="H", [0xC3]="I", [0xC4]="J", [0xC5]="K", [0xC6]="L", [0xC7]="M",
+  [0xC8]="N", [0xC9]="O", [0xCA]="P", [0xCB]="Q", [0xCC]="R", [0xCD]="S", [0xCE]="T", [0xCF]="U",
+  [0xD0]="V", [0xD1]="W", [0xD2]="X", [0xD3]="Y", [0xD4]="Z", [0xD5]="a", [0xD6]="b", [0xD7]="c",
+  [0xD8]="d", [0xD9]="e", [0xDA]="f", [0xDB]="g", [0xDC]="h", [0xDD]="i", [0xDE]="j", [0xDF]="k",
+  [0xE0]="l", [0xE1]="m", [0xE2]="n", [0xE3]="o", [0xE4]="p", [0xE5]="q", [0xE6]="r", [0xE7]="s",
+  [0xE8]="t", [0xE9]="u", [0xEA]="v", [0xEB]="w", [0xEC]="x", [0xED]="y", [0xEE]="z", [0xEF]=">",
+  [0xF0]=":", [0xF1]="Ä", [0xF2]="Ö", [0xF3]="Ü", [0xF4]="ä", [0xF5]="ö", [0xF6]="ü",
+}
 
--- a 0xFF-terminated game string at addr (at most max bytes)
+-- a 0xFF-terminated game string at addr (at most max bytes), as UTF-8
 local function gstr(addr, max)
+  local set = (V and V.japanese) and CHARSET_JP or CHARSET_INTL
   local out = {}
   local i = 0
   while i < max do
@@ -94,7 +137,7 @@ local function gstr(addr, max)
       out[#out + 1] = (p == 1 and "PLAYER") or (p == 6 and "RIVAL") or ""
       i = i + 1
     else
-      out[#out + 1] = CHARS[c] or "?"
+      out[#out + 1] = set[c] or "?"
     end
     i = i + 1
   end
@@ -105,44 +148,67 @@ local function encode(s)          -- ASCII to the games' charset (for checking a
   local t = {}
   for i = 1, #s do
     local c = s:sub(i, i)
-    for k, v in pairs(CHARS) do if v == c and k >= 0xA1 then t[#t + 1] = k; break end end
+    local best = nil                -- (M and F are also the gender signs' stand-ins: the letter is higher)
+    for k, v in pairs(CHARSET_INTL) do if v == c and k >= 0xA1 and (not best or k > best) then best = k end end
+    t[#t + 1] = best
   end
   return t
 end
 
+-- the first Pokemon's and the first nature's names in each language (to check a ROM's data)
+local FIRST_NAMES = { E = { "BULBASAUR", "HARDY" }, D = { "BISASAM", "ROBUST" }, F = { "BULBIZARRE", "HARDI" },
+                      I = { "BULBASAUR", "ARDITA" }, S = { "BULBASAUR", "FUERTE" } }
+local LANG_TAGS = { F = "FR", D = "DE", I = "IT", S = "ES", J = "JP" }
+local LANG = "E"                         -- the game's language (its header's last code letter)
+
 -- does this ROM have its data where build v says? (species 1's name, nature 0's name)
 local function matches(v)
+  local names = FIRST_NAMES[v.lang or "E"] or FIRST_NAMES.E
   local function at(addr, text)
     local want = encode(text)
     for i, b in ipairs(want) do if r8(addr + i - 1) ~= b then return false end end
     return r8(addr + #want) == 0xFF
   end
   local nat = r32(v.natureNames)
-  return at(v.speciesNames + 11, "BULBASAUR") and nat >= 0x08000000 and nat < 0x0A000000 and at(nat, "HARDY")
+  return at(v.speciesNames + (v.speciesStride or 11), names[1]) and nat >= 0x08000000 and nat < 0x0A000000 and at(nat, names[2])
+end
+
+local function useBuild(v, rev)
+  V = v
+  F = FAMILY[V.game]
+  -- found in the ROM: the Japanese games' save and gMain are laid out a little differently
+  if (V.flagsOffset and V.flagsOffset ~= F.flags) or (V.inBattle and V.inBattle ~= F.inBattle) then
+    local f = {}
+    for k, x in pairs(F) do f[k] = x end
+    f.flags = V.flagsOffset or f.flags
+    f.inBattle = V.inBattle or f.inBattle
+    F = f
+  end
+  gameName = V.game .. (rev > 0 and (" v1." .. rev) or "") .. (V.build and (" " .. V.build) or "") ..
+             (LANG_TAGS[LANG] and (" " .. LANG_TAGS[LANG]) or "")
 end
 
 local function detect()
   local code = ""
   for i = 0, 3 do code = code .. string.char(r8(0x080000AC + i)) end
   local rev = r8(0x080000BC)
+  LANG = code:sub(4, 4)
+  -- a game in another language: GB-Link Companion found its addresses in the ROM (romfind.go)
+  if OVERRIDE and OVERRIDE.code == code and OVERRIDE.found then useBuild(OVERRIDE, rev); return end
   local builds = {}
   if OVERRIDE and OVERRIDE.code == code then builds[1] = OVERRIDE end   -- a .sym next to the ROM
   for _, v in ipairs(VERSIONS[code .. rev] or {}) do builds[#builds + 1] = v end
   if #builds == 0 then
     unsupported = "This game isn't supported: only Pokemon Ruby, Sapphire, Emerald, FireRed and " ..
-                  "LeafGreen (English). Its code is " .. code .. ", revision " .. rev .. "."
+                  "LeafGreen. Its code is " .. code .. ", revision " .. rev .. "."
     return
   end
   for _, v in ipairs(builds) do
-    if matches(v) then
-      V = v
-      F = FAMILY[V.game]
-      gameName = V.game .. (rev > 0 and (" v1." .. rev) or "") .. (V.build and (" " .. V.build) or "")
-      return
-    end
+    if matches(v) then useBuild(v, rev); return end
   end
   unsupported = "This looks like a modified " .. builds[#builds].game .. " (ROM hack): its data isn't " ..
-                "where the original game keeps it. Put the build's .sym file next to the ROM (same name)."
+                "where the original game keeps it. Put the build's .sym file (from \"make syms\") next to the ROM, " ..
+                "then start the game again from GB-Link Companion (its window says if the .sym doesn't fit)."
 end
 
 ----------------------------------------------------------------------------------- names
@@ -150,12 +216,12 @@ local cache = { species = {}, ability = {}, nature = {}, mapsec = {} }
 local function speciesName(s)
   if s == 0 or s > 450 then return "?" end
   local n = cache.species[s]
-  if not n then n = gstr(V.speciesNames + 11 * s, 11); cache.species[s] = n end
+  if not n then local k = V.speciesStride or 11; n = gstr(V.speciesNames + k * s, k); cache.species[s] = n end
   return n
 end
 local function abilityName(a)
   local n = cache.ability[a]
-  if not n then n = gstr(V.abilityNames + 13 * a, 13); cache.ability[a] = n end
+  if not n then local k = V.abilityStride or 13; n = gstr(V.abilityNames + k * a, k); cache.ability[a] = n end
   return n
 end
 local NATURE_STATS = { "Atk", "Def", "Spe", "SpA", "SpD" }
@@ -166,8 +232,8 @@ local function natureName(n)
 end
 local function natureEffect(n)
   local up, down = n // 5, n % 5
-  if up == down then return "neutral" end
-  return "+" .. NATURE_STATS[up + 1] .. " -" .. NATURE_STATS[down + 1]
+  if up == down then return tr("neutral") end
+  return "+" .. tr(NATURE_STATS[up + 1]) .. " -" .. tr(NATURE_STATS[down + 1])
 end
 local function mapsecName(m)
   local n = cache.mapsec[m]
@@ -238,12 +304,12 @@ local function readMon(addr)
 end
 
 local function statusName(s)
-  if s & 7 ~= 0 then return "Asleep" end
-  if s & 0x88 ~= 0 then return "Poisoned" end
-  if s & 0x10 ~= 0 then return "Burned" end
-  if s & 0x20 ~= 0 then return "Frozen" end
-  if s & 0x40 ~= 0 then return "Paralyzed" end
-  return "OK"
+  if s & 7 ~= 0 then return tr("Asleep") end
+  if s & 0x88 ~= 0 then return tr("Poisoned") end
+  if s & 0x10 ~= 0 then return tr("Burned") end
+  if s & 0x20 ~= 0 then return tr("Frozen") end
+  if s & 0x40 ~= 0 then return tr("Paralyzed") end
+  return tr("OK")
 end
 
 local function isqrt(n)
@@ -308,6 +374,7 @@ local function searchOrigin()
     if not rng.bestD or d < rng.bestD then rng.best, rng.bestD = s, d end
     s = s + 1
     if s > 0xFFFF then
+      if rng.best == 0x6073 then rng.best = 0 end      -- seed 0's first advance is a 16-bit value too
       if rng.bestD <= ORIGIN_SURE then rng.origin = rng.best end
       rng.searching = nil
       return
@@ -390,8 +457,25 @@ findOrigin = function(pid)
   return nil
 end
 
+local rngFixed = nil
+-- Pokemon Emerald (the original) never seeds its RNG (the code is left out), so it starts from 0
+-- every time. Give it a random 16-bit seed instead, the way the game was meant to (pret's BUGFIX
+-- seeds it from the clock), while it's still on the seed-0 path near the start.
+local function fixEmeraldSeed(cur)
+  if not fixSeed or V.custom or V.game ~= "EMERALD" then return false end
+  if distance(0, cur) > 200000 then return false end   -- seeded already (or by a new game's timer)
+  local seed = math.random(1, 0xFFFF)
+  emu:write32(V.rng, seed)
+  rng.prev, rng.start, rng.origin, rng.searching, rngFixed = seed, seed, seed, nil, seed
+  rng.lastDelta = 0
+  hunt = nil
+  console:log(string.format("GB-Link Companion: gave Pokemon Emerald a random starting seed (%04X).", seed))
+  return true
+end
+
 local function rngFrame()
   local cur = r32(V.rng)
+  if fixEmeraldSeed(cur) then return end
   if rng.prev then
     local d = distance(rng.prev, cur)
     if d > 50000 then                     -- reseeded: find the new starting seed
@@ -500,11 +584,29 @@ end
 -- A screen is a list of lines; each line starts with its colour:
 -- 0 white, 1 grey, 2 green, 3 red, 4 yellow, 5 cyan.
 local W = 40
-local function pad(s, n) s = tostring(s); if #s >= n then return s:sub(1, n) end return s .. string.rep(" ", n - #s) end
-local function rpad(s, n) s = tostring(s); if #s >= n then return s:sub(1, n) end return string.rep(" ", n - #s) .. s end
+-- Text is UTF-8; kana take two columns on the GBA's screen.
+local function cw(cp) return (cp >= 0x3000 and cp <= 0x30FF) and 2 or 1 end
+local function dispW(s)
+  local w = 0
+  for _, cp in utf8.codes(s) do w = w + cw(cp) end
+  return w
+end
+local function cut(s, n)                 -- the first n columns of s, and how many columns that is
+  local w, out = 0, {}
+  for _, cp in utf8.codes(s) do
+    local c = cw(cp)
+    if w + c > n then break end
+    w = w + c
+    out[#out + 1] = utf8.char(cp)
+  end
+  return table.concat(out), w
+end
+local function pad(s, n) local t, w = cut(tostring(s), n); return t .. string.rep(" ", n - w) end
+local function rpad(s, n) local t, w = cut(tostring(s), n); return string.rep(" ", n - w) .. t end
+local function lab(s) return pad(tr(s), 16) end       -- a label in the screens' first column
 local function title(left)
   local right = gameName or ""
-  return "5" .. pad(left, W - #right - 1) .. " " .. right
+  return "5" .. pad(tr(left), W - dispW(right) - 1) .. " " .. right
 end
 local function commas(n)
   local s = tostring(math.floor(n))
@@ -517,51 +619,53 @@ local function inBattle() return (r8(V.main + F.inBattle) & 2) ~= 0 end
 local function battleFlags() return r32(V.battleType) end
 
 local function rngScreen()
-  if V.custom then return { title("RNG STATE"), "1", "1Not shown for this build." } end
+  if V.custom then return { title("RNG STATE"), "1", "1" .. tr("Not shown for this build.") } end
   local cur = r32(V.rng)
   local L = { title("RNG STATE"), "1" }
-  L[#L + 1] = "0Current seed    " .. hex(cur, 8)
+  local indent = string.rep(" ", 16)
+  L[#L + 1] = "0" .. lab("Current seed") .. hex(cur, 8)
   if rng.origin then
-    L[#L + 1] = "0Initial seed    " .. hex(rng.origin, 4)
-    L[#L + 1] = "0Advances        " .. commas(distance(rng.origin, cur))
+    L[#L + 1] = "0" .. lab("Initial seed") .. hex(rng.origin, 4) .. (rngFixed == rng.origin and "  *" or "")
+    L[#L + 1] = "0" .. lab("Advances") .. commas(distance(rng.origin, cur))
   elseif rng.searching then
-    L[#L + 1] = "1Initial seed    finding it..."
-    L[#L + 1] = "1Advances        -"
+    L[#L + 1] = "1" .. lab("Initial seed") .. tr("finding it...")
+    L[#L + 1] = "1" .. lab("Advances") .. "-"
   else
-    L[#L + 1] = "1Initial seed    unknown (seeded too long"
-    L[#L + 1] = "1                before this script started)"
-    L[#L + 1] = "0Advances        " .. commas(distance(rng.start, cur)) .. " since the script started"
+    L[#L + 1] = "1" .. lab("Initial seed") .. tr("unknown (seeded too long")
+    L[#L + 1] = "1" .. indent .. tr("before this script started)")
+    L[#L + 1] = "0" .. lab("Advances") .. commas(distance(rng.start, cur)) .. " " .. tr("since the script started")
   end
   local now = distance(rng.origin or rng.start, cur)
   if hunt and hunt.found then
     local left = hunt.found - now
-    L[#L + 1] = (left <= 600 and "4" or "2") .. "Next shiny      " .. pad(commas(hunt.found), 12) .. "in " .. commas(left)
-    L[#L + 1] = "0                " .. natureName(hunt.pid % 25) .. "  PID " .. hex(hunt.pid, 8)
+    L[#L + 1] = (left <= 600 and "4" or "2") .. lab("Next shiny") .. pad(commas(hunt.found), 12) .. tr("in") .. " " .. commas(left)
+    L[#L + 1] = "0" .. indent .. natureName(hunt.pid % 25) .. "  PID " .. hex(hunt.pid, 8)
     local iv = hunt.ivs
     L[#L + 1] = ((iv[1] + iv[2] + iv[3] + iv[4] + iv[5] + iv[6] == 186) and "2" or "1") ..
-                "                IV " .. table.concat(iv, "/")
+                indent .. "IV " .. table.concat(iv, "/")
   elseif hunt then
-    L[#L + 1] = "1Next shiny      searching..."
+    L[#L + 1] = "1" .. lab("Next shiny") .. tr("searching...")
     L[#L + 1] = "1"
     L[#L + 1] = "1"
   else
-    L[#L + 1] = "1Next shiny      load a save first"
+    L[#L + 1] = "1" .. lab("Next shiny") .. tr("load a save first")
     L[#L + 1] = "1"
     L[#L + 1] = "1"
   end
-  L[#L + 1] = "0Last frame      +" .. rng.lastDelta
-  L[#L + 1] = "0Per frame       " .. string.format("%.2f", rng.rate) .. "  (last second)"
-  L[#L + 1] = "0Frames          " .. commas(r32(V.main + 0x24)) .. "  (game's counter)"
+  L[#L + 1] = "0" .. lab("Last frame") .. "+" .. rng.lastDelta
+  L[#L + 1] = "0" .. lab("Per frame") .. string.format("%.2f", rng.rate) .. "  " .. tr("(last second)")
+  L[#L + 1] = "0" .. lab("Frames") .. commas(r32(V.main + 0x24)) .. "  " .. tr("(game's counter)")
   L[#L + 1] = "1"
-  L[#L + 1] = paused and "4mGBA is paused" or "1"
-  L[#L + 1] = "1Frames count the advances from the seed."
+  L[#L + 1] = (rngFixed and rngFixed == rng.origin) and ("1* " .. tr("Seed set by GB-Link Companion")) or "1"
+  L[#L + 1] = "1" .. tr("Frames count the advances from the seed.")
   return L
 end
 
 local function ivLines(L, m, indent)
   local iv = m.ivs
-  L[#L + 1] = "1" .. indent .. "IV  HP Atk Def SpA SpD Spe"
   local function c(v) return rpad(v, 3) end
+  L[#L + 1] = "1" .. indent .. "IV " .. c(tr("HP")) .. " " .. c(tr("Atk")) .. " " .. c(tr("Def")) .. " " .. c(tr("SpA")) ..
+              " " .. c(tr("SpD")) .. " " .. c(tr("Spe"))
   local perfect = iv.hp + iv.atk + iv.def + iv.spa + iv.spd + iv.spe == 186
   L[#L + 1] = (perfect and "2" or "0") .. indent .. "   " .. c(iv.hp) .. " " .. c(iv.atk) .. " " .. c(iv.def) ..
               " " .. c(iv.spa) .. " " .. c(iv.spd) .. " " .. c(iv.spe)
@@ -570,7 +674,7 @@ end
 -- species, nature, ability and IVs: screen lines 3-8, beside the front sprite (29 columns)
 local function monHead(L, m)
   local head = speciesName(m.species) .. " Lv" .. m.level .. " " .. m.gender
-  L[#L + 1] = (m.shiny and "4" or "0") .. head .. (m.shiny and " SHINY" or "")
+  L[#L + 1] = (m.shiny and "4" or "0") .. head .. (m.shiny and (" " .. tr("SHINY")) or "")
   L[#L + 1] = "0" .. natureName(m.nature) .. " (" .. natureEffect(m.nature) .. ")"
   L[#L + 1] = "0" .. abilityName(m.ability)
   ivLines(L, m, "")
@@ -580,9 +684,9 @@ end
 wildFrameLine = function(L, m)
   if V.custom then L[#L + 1] = "1"; return end
   local f = findOrigin(m.pid)
-  if f then L[#L + 1] = "5Frame " .. commas(f) .. "  (the advance it was made on)"
-  elseif origin.done then L[#L + 1] = "1Frame: not found (made too long ago)"
-  else L[#L + 1] = "1Frame: finding it..." end
+  if f then L[#L + 1] = "5" .. tr("Frame") .. " " .. commas(f) .. "  " .. tr("(the advance it was made on)")
+  elseif origin.done then L[#L + 1] = "1" .. tr("Frame: not found (made too long ago)")
+  else L[#L + 1] = "1" .. tr("Frame: finding it...") end
 end
 
 local lastWild, wildSafari = nil, false
@@ -595,8 +699,8 @@ local function wildScreen()
   m = m or lastWild
   if not m then
     L[#L + 1] = "1"
-    L[#L + 1] = "1No wild Pokemon yet."
-    L[#L + 1] = "1It shows here as soon as one appears."
+    L[#L + 1] = "1" .. tr("No wild Pokemon yet.")
+    L[#L + 1] = "1" .. tr("It shows here as soon as one appears.")
     return L
   end
   local hp, maxHP, status = m.hp, m.maxHP, m.status
@@ -610,28 +714,28 @@ local function wildScreen()
     L[1] = title("SAFARI POKEMON")
     return safariScreen(L, m, live)
   end
-  L[#L + 1] = live and "2In battle" or "1Last one seen (not in battle now)"
+  L[#L + 1] = live and ("2" .. tr("In battle")) or ("1" .. tr("Last one seen (not in battle now)"))
   monHead(L, m)
-  L[#L + 1] = "0HP " .. hp .. "/" .. maxHP .. "  " .. statusName(status)
+  L[#L + 1] = "0" .. tr("HP") .. " " .. hp .. "/" .. maxHP .. "  " .. statusName(status)
   L[#L + 1] = "1PID " .. hex(m.pid, 8)
   wildFrameLine(L, m)
   -- the catch rate the game uses for this throw: base rate x ball, scaled by HP left, x2 asleep or
   -- frozen, x1.5 poisoned, burned or paralyzed (then shake checks turn it into a chance)
   local _, now = catchChance(m.catchRate, 10, hp, maxHP, status)
   local why = {}
-  if maxHP > 0 then why[#why + 1] = "HP " .. (hp * 100 // maxHP) .. "%" end
-  if status & 0x27 ~= 0 then why[#why + 1] = statusName(status):lower() .. " x2"
-  elseif status & 0xD8 ~= 0 then why[#why + 1] = statusName(status):lower() .. " x1.5" end
-  L[#L + 1] = "0Catch rate " .. m.catchRate .. " -> " .. now .. " right now"
-  L[#L + 1] = "1  (" .. table.concat(why, ", ") .. (now > 254 and "; 255+ = sure catch)" or ")")
+  if maxHP > 0 then why[#why + 1] = tr("HP") .. " " .. (hp * 100 // maxHP) .. "%" end
+  if status & 0x27 ~= 0 then why[#why + 1] = statusName(status) .. " x2"
+  elseif status & 0xD8 ~= 0 then why[#why + 1] = statusName(status) .. " x1.5" end
+  L[#L + 1] = "0" .. tr("Catch rate") .. " " .. m.catchRate .. " -> " .. now .. " " .. tr("right now")
+  L[#L + 1] = "1  (" .. table.concat(why, ", ") .. (now > 254 and ("; 255+ = " .. tr("sure catch") .. ")") or ")")
   local function pct(p)
     p = p * 100
     if p >= 99.95 then return "100%" end
     return string.format("%.1f%%", p)
   end
   local function ball(x) return pct((catchChance(m.catchRate, x, hp, maxHP, status))) end
-  L[#L + 1] = "5 Poke " .. pad(ball(10), 7) .. "Great " .. pad(ball(15), 7) .. "Ultra " .. ball(20)
-  L[#L + 1] = "1 Chance of a catch per throw, right now"
+  L[#L + 1] = "5 " .. tr("Poke") .. " " .. pad(ball(10), 6) .. tr("Great") .. " " .. pad(ball(15), 6) .. tr("Ultra") .. " " .. ball(20)
+  L[#L + 1] = "1 " .. tr("Chance of a catch per throw, right now")
   return L, { spriteSpec(0, 29, 3, 64, 64, frontSprite(m.species, m.shiny)) }
 end
 
@@ -645,13 +749,13 @@ end
 
 safariScreen = function(L, m, live)
   local s = live and safariState() or nil
-  L[#L + 1] = live and "2In the Safari Zone" or "1Last one seen (not in battle now)"
+  L[#L + 1] = live and ("2" .. tr("In the Safari Zone")) or ("1" .. tr("Last one seen (not in battle now)"))
   monHead(L, m)
   L[#L + 1] = "1PID " .. hex(m.pid, 8)
   wildFrameLine(L, m)
   local spr = { spriteSpec(0, 29, 3, 64, 64, frontSprite(m.species, m.shiny)) }
   if not s then
-    L[#L + 1] = "0Catch rate " .. m.catchRate
+    L[#L + 1] = "0" .. tr("Catch rate") .. " " .. m.catchRate
     return L, spr
   end
   -- what the Safari Ball uses: catch factor x 1275 / 100 as the catch rate, x1.5 for the ball
@@ -667,13 +771,15 @@ safariScreen = function(L, m, live)
   end
   flee = math.min(flee * 5, 100)
   local function pct(p) if p >= 0.9995 then return "100%" end return string.format("%.1f%%", p * 100) end
-  L[#L + 1] = "5Safari Ball  " .. pct(chance) .. "   (catch factor " .. s.catch .. ")"
-  L[#L + 1] = (flee >= 50 and "3" or "4") .. "Flee chance  " .. flee .. "% each turn   (factor " .. s.escape .. ")"
+  local lw = math.max(13, dispW(tr("Safari Ball")) + 2, dispW(tr("Flee chance")) + 2)
+  L[#L + 1] = "5" .. pad(tr("Safari Ball"), lw) .. pct(chance) .. "   (" .. tr("catch factor") .. " " .. s.catch .. ")"
+  L[#L + 1] = (flee >= 50 and "3" or "4") .. pad(tr("Flee chance"), lw) .. flee .. "% " .. tr("each turn") ..
+              "   (" .. tr("factor") .. " " .. s.escape .. ")"
+  local function left(n) return n > 0 and (n .. " " .. tr("turns left")) or tr("none") end
   if F.frlg then
-    L[#L + 1] = "1Rock: " .. (s.c1 > 0 and (s.c1 .. " turns left") or "none") ..
-                "   Bait: " .. (s.c2 > 0 and (s.c2 .. " turns left") or "none")
+    L[#L + 1] = "1" .. tr("Rock:") .. " " .. left(s.c1) .. "   " .. tr("Bait:") .. " " .. left(s.c2)
   else
-    L[#L + 1] = "1Went near " .. s.c1 .. " times   Pokeblocks thrown " .. s.c2
+    L[#L + 1] = "1" .. tr("Went near") .. " " .. s.c1 .. " " .. tr("times") .. "   " .. tr("Pokeblocks thrown") .. " " .. s.c2
   end
   return L, spr
 end
@@ -687,9 +793,10 @@ local function trainerScreen()
     mons = {}
     for i = 0, 5 do mons[#mons + 1] = readMon(V.enemy + 100 * i) or false end
     local opp = r16(V.opponent)
-    local t = V.trainers + 40 * opp
-    local name = gstr(t + 4, 12)
-    local class = gstr(V.classNames + 13 * r8(t + 1), 13)
+    local t = V.trainers + (V.trainerSize or 40) * opp
+    local name = gstr(t + (V.trainerName or 4), V.trainerNameLen or 12)
+    local ck = V.classStride or 13
+    local class = gstr(V.classNames + ck * r8(t + 1), ck)
     local out = {}
     for i = 0, 3 do out[i] = r8(V.partyIdx + 2 * i) end   -- party slots of the opponent battlers
     lastTrainer = { name = (class .. " " .. name):gsub("^%s+", ""), mons = mons,
@@ -698,40 +805,46 @@ local function trainerScreen()
   local t = lastTrainer
   if not t then
     L[#L + 1] = "1"
-    L[#L + 1] = "1No trainer battle yet."
-    L[#L + 1] = "1The whole team shows here, including"
-    L[#L + 1] = "1Pokemon that haven't been sent out."
+    L[#L + 1] = "1" .. tr("No trainer battle yet.")
+    L[#L + 1] = "1" .. tr("The whole team shows here, including")
+    L[#L + 1] = "1" .. tr("Pokemon that haven't been sent out.")
     return L
   end
   local n = 0
   for _, m in ipairs(t.mons) do if m then n = n + 1 end end
-  L[#L + 1] = (live and "2" or "1") .. pad(t.name, 28) .. rpad(n .. " Pokemon", 12)
-  if not live then L[#L + 1] = "1(last trainer battle)" end
+  L[#L + 1] = (live and "2" or "1") .. pad(t.name, 28) .. rpad(n .. " " .. tr("Pokemon"), 12)
+  if not live then L[#L + 1] = "1" .. tr("(last trainer battle)") end
   local sprites = {}
   for i, m in ipairs(t.mons) do
     if m then                -- 4 lines each (36 px), with the party icon beside them
       local fainted = m.hp == 0
       local col = fainted and "1" or (m.shiny and "4" or "0")
-      local tag = fainted and "fainted" or (t.out[i - 1] and live and "OUT" or "")
+      local tag = fainted and tr("fainted") or (t.out[i - 1] and live and tr("OUT") or "")
       sprites[#sprites + 1] = spriteSpec(i, 34, #L + 1, 32, 32, iconSprite(m.species))
       L[#L + 1] = col .. i .. " " .. pad(speciesName(m.species), 11) .. pad("Lv" .. m.level, 6) .. m.gender ..
-                  (m.shiny and " SHINY" or "") .. "  " .. tag
+                  (m.shiny and (" " .. tr("SHINY")) or "") .. "  " .. tag
       L[#L + 1] = "0  " .. pad(natureName(m.nature), 9) .. abilityName(m.ability)
-      L[#L + 1] = "0  HP " .. pad(m.hp .. "/" .. m.maxHP, 9) .. "PID " .. hex(m.pid, 8)
+      L[#L + 1] = "0  " .. tr("HP") .. " " .. pad(m.hp .. "/" .. m.maxHP, 9) .. "PID " .. hex(m.pid, 8)
       local iv = m.ivs
       L[#L + 1] = "1  IV " .. iv.hp .. "/" .. iv.atk .. "/" .. iv.def .. "/" .. iv.spa .. "/" .. iv.spd .. "/" .. iv.spe
     end
   end
-  L[#L + 1] = "1IV: HP/Atk/Def/SpA/SpD/Spe"
+  L[#L + 1] = "1IV: " .. tr("HP") .. "/" .. tr("Atk") .. "/" .. tr("Def") .. "/" .. tr("SpA") .. "/" .. tr("SpD") .. "/" .. tr("Spe")
   return L, sprites
 end
 
 -- The region map as a grid of cells: 0 empty, 1 route, 2 town/city, 3 other place, 4 where you are.
-local function cellType(name)
-  if name:find("^ROUTE") then return 1 end
-  if name:find("TOWN$") or name:find("CITY$") or name:find("ISLAND$") or name:find("PLATEAU$") then return 2 end
-  if name == "" then return 0 end
-  return 3
+-- By the place's number (the same in every language): routes, then towns, cities and islands.
+local MAPSEC_KIND = {}
+do
+  local function set(a, b, k) for m = a, b do MAPSEC_KIND[m] = k end end
+  set(0x10, 0x31, 1); set(0x63, 0x7D, 1)               -- Hoenn's routes 101-134, Kanto's 1-25
+  set(0x00, 0x0F, 2); set(0x58, 0x62, 2); set(0x8F, 0x95, 2)  -- towns and cities, the Sevii Islands
+  MAPSEC_KIND[0x47], MAPSEC_KIND[0x49], MAPSEC_KIND[0xA3], MAPSEC_KIND[0xBB] = 2, 2, 2, 2  -- Mirage, Southern, Outcast, Birth Island
+end
+local function cellType(m)
+  if mapsecName(m) == "" then return 0 end
+  return MAPSEC_KIND[m] or 3
 end
 
 local gridCache = {}
@@ -748,7 +861,7 @@ local function hoennGrid()
   end
   for pass = 1, 3 do          -- routes, then places, then towns on top
     for m, r in pairs(rects) do
-      local t = cellType(mapsecName(m))
+      local t = cellType(m)
       if (pass == 1 and t == 1) or (pass == 2 and t == 3) or (pass == 3 and t == 2) then
         for yy = r.y, r.y + r.h - 1 do
           for xx = r.x, r.x + r.w - 1 do
@@ -785,7 +898,7 @@ local function frlgGrid(region)
         local m = r8(base + layer * F.gridW * F.gridH + y * F.gridW + x)
         local i = y * F.gridW + x
         if m ~= F.mapsecNone then
-          local t = cellType(mapsecName(m))
+          local t = cellType(m)
           if layer == 0 or (g[i] or 0) == 0 then g[i] = t; sec[i] = m end
           where[m] = where[m] or {}
           table.insert(where[m], { x = x, y = y })
@@ -876,7 +989,7 @@ local function placeCounts(m)
   end
   local function part(l, t) return t == 0 and "-" or (l .. "/" .. t) end
   local col = (tl + il > 0) and "0" or "2"
-  return col .. "Trainers: " .. part(tl, tt) .. "  Items: " .. part(il, it)
+  return col .. tr("Trainers:") .. " " .. part(tl, tt) .. "  " .. tr("Items:") .. " " .. part(il, it)
 end
 
 -- A picture of a place: its main map (the biggest outdoor one, else the biggest), one colour per
@@ -1181,7 +1294,7 @@ local function mapScreen()
       if outdoors then cx, cy = r.x + scale(px, mw, r.w), r.y + scale(py, mh, r.h) end
     end
   end
-  local L = { title("MAP  " .. region) }
+  local L = { title(tr("MAP") .. "  " .. tr(region)) }
   local grid = F.frlg and frlgGrid(frlgRegion(mapsec)) or hoennGrid()
   local sel = cursor and grid.sec[cursor[2] * F.gridW + cursor[1]] or nil
   if cursor then                 -- looking around: the place under the cursor
@@ -1193,11 +1306,11 @@ local function mapScreen()
       L[#L + 1] = "4" .. mapsecName(sel)
       L[#L + 1] = placeCounts(sel)
     else
-      L[#L + 1] = "1Nothing here"
+      L[#L + 1] = "1" .. tr("Nothing here")
       L[#L + 1] = "1"
     end
   else
-    local here = (name ~= "" and name or "Somewhere unnamed") .. (MAP_TYPES[mapType] and not outdoors and (" (" .. MAP_TYPES[mapType] .. ")") or "")
+    local here = (name ~= "" and name or tr("Somewhere unnamed")) .. (MAP_TYPES[mapType] and not outdoors and (" (" .. tr(MAP_TYPES[mapType]) .. ")") or "")
     L[#L + 1] = (name ~= "" and "4" or "1") .. pad(here, 26) .. rpad("X" .. px .. " Y" .. py, 14)
     L[#L + 1] = name ~= "" and placeCounts(mapsec) or "1"
   end
@@ -1216,7 +1329,7 @@ local function mapScreen()
   if preview and sel then
     local pic = placePicture(sel)
     if pic then parts[#parts + 1] = pic; return L, parts end
-    L[3] = "1No picture for this place"
+    L[3] = "1" .. tr("No picture for this place")
   end
   return L, parts
 end
@@ -1236,7 +1349,7 @@ local function drop(why)
   if sock then sock:close() end
   sock, buf, tries = nil, "", 0
   apply(0)
-  if why then console:log("GB-Link: " .. why) end
+  if why then console:log("GB-Link Companion: " .. why) end
 end
 
 local function send(line)
@@ -1267,7 +1380,7 @@ local function connect()
   local s = socket.tcp()
   if s:connect("127.0.0.1", PORT) then
     sock, buf, lastSent, helloSent, sentOnce = s, "", nil, false, {}
-    console:log("GB-Link: connected - the GBA's buttons control mGBA, and its menu shows game info")
+    console:log("GB-Link Companion: connected - the GBA's buttons control mGBA, and its menu shows game info")
   else
     s:close()
     if tries >= 5 then
@@ -1276,7 +1389,7 @@ local function connect()
   end
 end
 
-local readCommands, afterCommands, pauseHere   -- below
+local readCommands, afterCommands   -- below
 
 local function sendScreen(L, extra)
   local parts = { "D" .. mode }
@@ -1284,6 +1397,214 @@ local function sendScreen(L, extra)
   for _, x in pairs(extra or {}) do parts[#parts + 1] = x end     -- map, sprites
   local line = table.concat(parts, "\t")
   if line ~= lastSent then send(line); lastSent = line end
+end
+
+
+------------------------------------------------------------------------------ Wonder Cards
+-- GB-Link Companion sends a Wonder Card (the card, its icon and its RAM script, from a .wc3) to
+--  * add it to the game: what the game does when it receives one by Mystery Gift (SaveWonderCard
+--    and InitRamScript_NoObjectEvent), so the deliveryman on Pokemon Center 2F hands it over, or
+--  * use it now: the card's script runs straight away, as if the deliveryman had just handed it
+--    over, and the card the game has (if any) stays as it was.
+-- Only the original Emerald, FireRed and LeafGreen, in any language (the app checks the ROM first and
+-- sends the GB-Link team's card made for it). The European games keep them where the English do. The
+-- Japanese ones' cards are shorter and their Mystery Gift save is laid out otherwise: there, a card is
+-- only used now (its script goes where theirs does, as the GB-Link team's Japanese cards expect).
+local WC = {
+  EMERALD   = { mg = 0x322C, rs = 0x3728, flags = 0x1270, vars = 0x139C, giftFlags = { 0x1E4, 0x1F3 },
+                giftVars = { 0x40DD, 0x40DE, 0x40DF, 0x40E0, 0x40E1, 0x40E2, 0x40E3, 0x40E4 } },
+  FIRERED   = { mg = 0x3120, rs = 0x361C, flags = 0x0EE0, vars = 0x1000, giftFlags = { 0x3D8, 0x3E7 },
+                giftVars = { 0x40B5, 0x40B6, 0x40B7, 0x40B8, 0x40B9, 0x40BA, 0x40BB, 0x40BC, 0x4024 } },
+}
+WC.LEAFGREEN = WC.FIRERED
+local CARD_BYTES, META_BYTES, SCRIPT_DATA_BYTES = 332, 36, 1000
+local JP_CARD_BYTES = 164                 -- the Japanese games' cards
+-- in struct MysteryGiftSave: cardCrc, card, cardMetadataCrc, cardMetadata, ..., trainerIds
+local MG_CARD_CRC, MG_META_CRC, MG_TRAINER_IDS = 0x1C0, 0x310, 0x344
+
+local CRC_TABLE = {}
+for i = 0, 255 do
+  local c = i
+  for _ = 1, 8 do c = (c & 1 == 1) and ((c >> 1) ~ 0x8408) or (c >> 1) end
+  CRC_TABLE[i] = c
+end
+local function crc16(bytes)               -- CalcCRC16WithTable
+  local crc = 0x1121
+  for i = 1, #bytes do
+    local hi = crc >> 8
+    crc = crc ~ bytes[i]
+    crc = hi ~ CRC_TABLE[crc & 0xFF]
+  end
+  return (~crc) & 0xFFFF
+end
+local function fromHex(h)
+  local t = {}
+  for i = 1, #h - 1, 2 do t[#t + 1] = tonumber(h:sub(i, i + 1), 16) end
+  return t
+end
+local function writeBytes(addr, t) for i = 1, #t do emu:write8(addr + i - 1, t[i]) end end
+local function readBytes(addr, n) local t = {}; for i = 0, n - 1 do t[i + 1] = r8(addr + i) end; return t end
+local function zeros(n) local t = {}; for i = 1, n do t[i] = 0 end; return t end
+local function u32le(v) return { v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF } end
+
+local wcJob = nil            -- a card being used now: waiting for the overworld, or running
+local wcResident = nil       -- the card that keeps running (until the game is reset), if any
+local wcOrigVBlank = nil     -- the game's own V-blank handler, before any such card hooked it
+-- The cards that keep running all copy their code to the same spare RAM and hook the V-blank
+-- interrupt there; their state is at 0x0203FF60 (and FireRed/LeafGreen's "R opens Help" flag).
+local RESIDENT_LO, RESIDENT_HI, HOOK_STATE = 0x0203FC00, 0x02040000, 0x0203FF60
+local HELP_R_DISABLE_FRLG = 0x0203F175
+local function wcHooked()
+  local v = r32(V.intrTable + 0x10)
+  return v >= RESIDENT_LO and v < RESIDENT_HI
+end
+
+local function wcReply(id, ok, text) send("w" .. id .. "\t" .. (ok and "ok" or "no") .. "\t" .. (text or "")) end
+
+local function wcSave()      -- SaveBlock1, if a game is loaded
+  local sb1 = V.sb1 or r32(V.sb1ptr)
+  local sb2 = V.sb2 or r32(V.sb2ptr)
+  if sb1 < 0x02000000 or sb1 >= 0x02040000 or sb2 < 0x02000000 or sb2 >= 0x03008000 then return nil end
+  if r16(sb2 + 0x0A) == 0 and r16(sb2 + 0x0C) == 0 then return nil end   -- no Trainer ID: no game loaded
+  return sb1
+end
+
+-- the player can move: the overworld is running and no script or menu has the controls
+local function wcFree()
+  return r32(V.main + 4) | 1 == V.cb2Overworld | 1 and r32(V.main) | 1 == V.cb1Overworld | 1 and
+         r8(V.scriptStatus) == 2 and r8(V.lockControls) == 0
+end
+
+-- What the game does when Mystery Gift receives a card: ClearSavedWonderCardAndRelated, then
+-- SaveWonderCard and InitRamScript_NoObjectEvent.
+local function wcAdd(sb1, card, icon, data)
+  local L = WC[V.game]
+  local mg = sb1 + L.mg
+  writeBytes(mg + MG_CARD_CRC, u32le(crc16(card)))
+  writeBytes(mg + MG_CARD_CRC + 4, card)
+  local meta = zeros(META_BYTES)
+  meta[7], meta[8] = icon[1], icon[2]                 -- iconSpecies
+  writeBytes(mg + MG_META_CRC, u32le(0))
+  writeBytes(mg + MG_META_CRC + 4, meta)
+  writeBytes(mg + MG_TRAINER_IDS, zeros(40))
+  for f = L.giftFlags[1], L.giftFlags[2] do            -- ClearMysteryGiftFlags
+    local a = sb1 + L.flags + (f >> 3)
+    emu:write8(a, r8(a) & ~(1 << (f & 7)) & 0xFF)
+  end
+  for _, v in ipairs(L.giftVars) do emu:write16(sb1 + L.vars + (v - 0x4000) * 2, 0) end   -- ClearMysteryGiftVars
+  if data[1] == 51 then                                -- RAM_SCRIPT_MAGIC: the deliveryman's script
+    writeBytes(sb1 + L.rs, u32le(crc16(data)))
+    writeBytes(sb1 + L.rs + 4, data)
+  else
+    writeBytes(sb1 + L.rs, zeros(4 + SCRIPT_DATA_BYTES))
+  end
+end
+
+-- somewhere in the ROM with "release, end": where the card's script goes when it's done
+local stubAddr = nil
+local function wcStub()
+  if stubAddr then return stubAddr end
+  for a = 0x08100000, 0x08800000, 2 do
+    if r16(a) == 0x026C then stubAddr = a; return a end
+  end
+  return nil
+end
+
+-- Using a card now: its card and script go where the deliveryman's would, the game's script
+-- engine starts on the script (ScriptContext_SetupScript), and when it's done the card and
+-- script the game had are put back.
+local function wcStart(job, sb1)
+  local L = WC[V.game]
+  if job.resident and not wcHooked() then wcOrigVBlank = r32(V.intrTable + 0x10) end
+  if job.replace and wcHooked() then         -- take the old card's hook away: the game's own handler back
+    emu:write32(V.intrTable + 0x10, wcOrigVBlank)
+    writeBytes(HOOK_STATE, zeros(RESIDENT_HI - HOOK_STATE))
+    if V.game ~= "EMERALD" then emu:write8(V.helpRDisable or HELP_R_DISABLE_FRLG, 0) end
+    wcResident = nil
+  end
+  local mg, rs = sb1 + L.mg, sb1 + L.rs
+  job.saved = { rs = readBytes(rs, 4 + SCRIPT_DATA_BYTES), ret = r32(V.ramScriptRet) }
+  if not V.japanese then                               -- the card too, where the deliveryman's would be
+    job.saved.mg = readBytes(mg + MG_CARD_CRC, MG_TRAINER_IDS + 40 - MG_CARD_CRC)
+    writeBytes(mg + MG_CARD_CRC, u32le(crc16(job.card)))
+    writeBytes(mg + MG_CARD_CRC + 4, job.card)
+  end
+  writeBytes(rs, u32le(crc16(job.data)))
+  writeBytes(rs + 4, job.data)
+  emu:write32(V.ramScriptRet, wcStub())
+  local ctx = V.scriptCtx
+  writeBytes(ctx, zeros(0x74))                         -- InitScriptContext
+  emu:write32(ctx + 0x5C, V.cmdTable)
+  emu:write32(ctx + 0x60, V.cmdTableEnd)
+  emu:write32(ctx + 8, rs + 8)                         -- SetupBytecodeScript: the script
+  emu:write8(ctx + 1, 1)                               -- SCRIPT_MODE_BYTECODE
+  emu:write8(V.lockControls, 1)                        -- LockPlayerFieldControls
+  emu:write8(V.scriptStatus, 0)                        -- CONTEXT_RUNNING
+  job.running, job.frames = true, 0
+end
+
+local function wcFinish(job)
+  local sb1 = wcSave()
+  if sb1 and job.saved then                            -- put back the game's own card and script
+    local L = WC[V.game]
+    if job.saved.mg then writeBytes(sb1 + L.mg + MG_CARD_CRC, job.saved.mg) end
+    writeBytes(sb1 + L.rs, job.saved.rs)
+  end
+  if job.resident then wcResident = wcHooked() and job.label or nil end
+  wcReply(job.id, true, "used")
+end
+
+-- each frame: a card waiting to be used, or running
+local function wcTick()
+  local job = wcJob
+  if not job or not V then return end
+  if not job.running then
+    job.wait = job.wait + 1
+    if job.wait > 3 * 60 * 60 then wcJob = nil; wcReply(job.id, false, "The game was busy for 3 minutes: close any menu and walk around in the game, then try again."); return end
+    local sb1 = wcSave()
+    if sb1 and wcFree() then wcStart(job, sb1) end
+    return
+  end
+  job.frames = job.frames + 1
+  -- done: the script ended (and the player can move again), or ran for 10 minutes
+  if (r8(V.scriptStatus) == 2 and r8(V.lockControls) == 0) or job.frames > 36000 then
+    wcJob = nil
+    wcFinish(job)
+  end
+end
+
+-- "W<A|U><id>,<card hex>,<icon hex>,<script data hex>,<resident 0/1>,<label>"
+local function wcCommand(line)
+  local how, id, cardH, iconH, dataH, res, label = line:match("^W([AU])(%d+),(%x+),(%x+),(%x+),(%d),(.*)$")
+  if not how then return end
+  if not V or V.custom or not WC[V.game] or not V.scriptCtx or not V.intrTable then
+    wcReply(id, false, "This game can't take Wonder Cards here."); return
+  end
+  local card, icon, data = fromHex(cardH), fromHex(iconH), fromHex(dataH)
+  if #card ~= (V.japanese and JP_CARD_BYTES or CARD_BYTES) or #icon ~= 2 or #data ~= SCRIPT_DATA_BYTES then wcReply(id, false, "The card's data isn't right."); return end
+  local sb1 = wcSave()
+  if not sb1 then wcReply(id, false, "Load your game first (continue from the title screen)."); return end
+  if how == "A" then
+    if V.japanese then wcReply(id, false, "The Japanese games can only use a card now (Use now)."); return end
+    wcAdd(sb1, card, icon, data)
+    wcReply(id, true, "added")
+    return
+  end
+  if data[1] ~= 51 then wcReply(id, false, "This card has no script, so there's nothing to use."); return end
+  if wcJob then wcReply(id, false, "Another card is being used: wait for it to finish."); return end
+  if res ~= "0" and wcHooked() and wcResident ~= label then  -- another card that keeps running is on
+    if res == "1" then
+      send("w" .. id .. "\tbusy\t" .. (wcResident or ""))   -- the app offers to replace it
+      return
+    end
+    if not wcOrigVBlank then
+      wcReply(id, false, "A card that keeps running was turned on before GB-Link Companion could see it. Reset the game in mGBA first.")
+      return
+    end
+  end
+  if not wcStub() then wcReply(id, false, "Couldn't find what the script needs in this ROM."); return end
+  wcJob = { id = id, card = card, data = data, resident = res ~= "0", replace = res == "2", label = label, wait = 0 }
+  send("w" .. id .. "\twait\t")
 end
 
 local function poll()
@@ -1299,14 +1620,10 @@ local function poll()
   local keys = readCommands()
   buf = buf:match("[^\n]*$")
   if keys then quiet = 0 else quiet = quiet + 1 end
-  if quiet > 45 and added ~= 0 and holdFrames == 0 then
+  if quiet > 45 and added ~= 0 then
     apply(0)                             -- no word from the GBA for a while (saving): let go
   end
-  if holdFrames > 0 then                 -- just went on: the chosen buttons for a few frames
-    holdFrames = holdFrames - 1
-    apply(((keys or added) | holdKeys) & 0x3FF)
-    if holdFrames == 0 then apply(keys or 0) end
-  elseif keys then apply(keys & 0x3FF) end
+  if keys then apply(keys & 0x3FF) end
   afterCommands()
 end
 
@@ -1314,16 +1631,14 @@ readCommands = function()
   local keys = nil
   for line in buf:gmatch("([^\n]*)\n") do
     local c = line:sub(1, 1)
-    if c == "P" then
-      local op, arg = line:sub(2, 2), line:sub(3)
-      if op == "P" then paused, steps = true, 0
-      elseif op == "S" then steps = steps + (tonumber(arg) or 1)
-      elseif op == "G" then
-        paused, steps = false, 0
-        holdKeys, holdFrames = (tonumber(arg, 16) or 0) & 0x3FF, (tonumber(arg, 16) or 0) ~= 0 and HOLD_FRAMES or 0
+    if c == "K" then keys = tonumber(line:sub(2), 16)
+    elseif c == "W" then
+      local okW, err = pcall(wcCommand, line)
+      if not okW then                         -- say so, rather than leave the app waiting
+        console:log("GB-Link Companion: Wonder Card: " .. tostring(err))
+        wcReply(line:match("^W[AU](%d+)") or "0", false, "mGBA's script couldn't send it (" .. tostring(err):sub(1, 120) .. ").")
       end
-      urgent = true
-    elseif c == "K" then keys = tonumber(line:sub(2), 16)
+    elseif c == "F" then fixSeed = line:sub(2, 2) == "1"
     elseif c == "M" then mode = tonumber(line:sub(2)) or 0; lastSent = nil
     elseif c == "C" then
       local x, y, v = line:match("^C(%d+),(%d+),?(%d*)")
@@ -1355,7 +1670,7 @@ afterCommands = function()
   if not emu then return end
   if not V and not unsupported then detect() end
   if not helloSent then
-    send("H" .. (V and gameName or ("!" .. (unsupported or "No game"))) .. ((V and V.custom) and "\t-rng" or ""))
+    send("H" .. (V and gameName or ("!" .. (unsupported or "No game"))) .. ((V and V.custom) and "\t-rng" or "") .. "\twc")
     helloSent = true
   end
   if not V then return end
@@ -1368,43 +1683,18 @@ afterCommands = function()
     end
   end
   pcall(watchEncounters)
+  local okW, errW = pcall(wcTick)
+  if not okW then console:log("GB-Link Companion: Wonder Card: " .. tostring(errW)); wcJob = nil end
   frame = frame + 1
   if mode >= 1 and mode <= #SCREENS and (frame % 10 == 0 or urgent) then
     urgent = false
     local ok, L, extra = pcall(SCREENS[mode])
-    if not ok then L, extra = { "3Couldn't read the game: " .. tostring(L):sub(1, 60) }, nil end
+    if not ok then L, extra = { "3" .. tr("Couldn't read the game:") .. " " .. tostring(L):sub(1, 60) }, nil end
     sendScreen(L, extra)
   end
-  if paused then pauseHere() end
-end
-
--- Paused: hold mGBA here, between frames, until a step or "go" arrives (or the app goes away).
-pauseHere = function()
-  if steps > 0 then steps = steps - 1; return end
-  if mode >= 1 and mode <= #SCREENS then         -- where it stopped, on the GBA
-    local okS, L, extra = pcall(SCREENS[mode])
-    if okS then sendScreen(L, extra) end
-  end
-  while paused and steps == 0 and sock do
-    local ok = sock._s:select(20)              -- wait up to 20 ms for the app
-    if ok and ok < 0 then drop("disconnected"); break end
-    if ok and ok > 0 then
-      local data = sock:receive(512)
-      if not data then drop("disconnected"); break end
-      buf = buf .. data
-      readCommands()
-      buf = buf:match("[^\n]*$")
-      if mode >= 1 and mode <= #SCREENS then       -- show the change on the GBA straight away
-        local okS, L, extra = pcall(SCREENS[mode])
-        if okS then sendScreen(L, extra) end
-      end
-    end
-  end
-  if not sock then paused = false end
-  if steps > 0 then steps = steps - 1 end
 end
 
 callbacks:add("frame", poll)
-callbacks:add("reset", function() added = 0; V, unsupported, helloSent = nil, nil, false; cache = { species = {}, ability = {}, nature = {}, mapsec = {} }; gridCache = {}; spriteCache = {}; mapIndex = nil; tileStats, metaColor, tilesetBytes, previewCache = {}, {}, {}, {}; bgCache, iconCache = {}, {}; rng.prev, rng.origin, rng.searching = nil, nil, nil end)
+callbacks:add("reset", function() added = 0; V, unsupported, helloSent = nil, nil, false; cache = { species = {}, ability = {}, nature = {}, mapsec = {} }; gridCache = {}; spriteCache = {}; mapIndex = nil; tileStats, metaColor, tilesetBytes, previewCache = {}, {}, {}, {}; bgCache, iconCache = {}, {}; rng.prev, rng.origin, rng.searching = nil, nil, nil; wcJob, wcResident, wcOrigVBlank = nil, nil, nil end)
 callbacks:add("start", function() added = 0 end)
-console:log("GB-Link controller and status script loaded (port " .. PORT .. ")")
+console:log("GB-Link Companion script loaded (port " .. PORT .. ")")

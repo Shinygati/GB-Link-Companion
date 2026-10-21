@@ -18,24 +18,44 @@ import (
 	"time"
 )
 
-//go:embed assets/gblink_sync_mb.gba
+//go:embed assets/gblink_companion_mb.gba
 var helperImage []byte
 
 const controllerPort = 47187
 
 type Session struct {
-	ui       *UI
-	app      *App
-	game     *Game
-	state    GameState
-	link     *GBLink
-	helper   *Helper
-	linkMu   sync.Mutex // one user of the link cable at a time
-	cart     []byte     // what we know is on the cart (nil = unknown)
-	saveType int
-	bridge   *Bridge
-	stopped  bool
-	cancel   chan struct{} // closed when the player cancels a backup
+	ui         *UI
+	app        *App
+	game       *Game
+	state      GameState
+	link       *GBLink
+	helper     *Helper
+	linkMu     sync.Mutex // one user of the link cable at a time
+	cart       []byte     // what we know is on the cart (nil = unknown)
+	saveType   int
+	bridge     *Bridge
+	stopped    atomic.Bool   // the window was closed before the game started: stop (closeWhileBusy)
+	cancel     chan struct{} // closed when the player cancels a backup
+	helperLg   byte          // the language the helper's text is in now (0: not known)
+	clockUsed  bool          // the .sav ends with the cartridge's clock for mGBA (cartclock.go)
+	lastBackup string        // hash of the last save backed up from mGBA
+}
+
+// helperLang: the language for the GBA's text: the Pokémon game's (lang.go), else English
+func (s *Session) helperLang() byte {
+	if s.game != nil {
+		return gameLang(s.game.Code)
+	}
+	return 'E'
+}
+
+// matchHelperLang tells a running helper the game's language, if it might be in another one.
+func (s *Session) matchHelperLang() {
+	if lang := s.helperLang(); s.helperLg != lang {
+		if s.helper.SetLanguage(lang) == nil {
+			s.helperLg = lang
+		}
+	}
 }
 
 func hash(b []byte) string { h := sha1.Sum(b); return hex.EncodeToString(h[:]) }
@@ -70,6 +90,7 @@ func (s *Session) connect() error {
 // why is the reason shown to the player. Returns errCancelled if they cancel.
 func (s *Session) ensureHelper(why string) error {
 	if s.helper.Alive(1500 * time.Millisecond) {
+		s.matchHelperLang()
 		return nil
 	}
 	s.ui.SetGBA("off")
@@ -82,11 +103,14 @@ func (s *Session) ensureHelper(why string) error {
 			Text: "Hold START and SELECT while you switch the GBA on, with " + which +
 				" in it. If it's already on, switch it off first.",
 			Buttons: []Button{{ID: "cancel", Label: "Cancel", Style: "secondary"}}})
-		err := s.link.Multiboot(helperImage, 365*24*time.Hour, func() bool { _, ok := s.ui.Answer(id); return ok || s.stopped })
+		lang := s.helperLang()
+		err := s.link.Multiboot(helperImageFor(lang), 365*24*time.Hour, func() bool { _, ok := s.ui.Answer(id); return ok || s.stopped.Load() })
 		s.ui.ClearPrompt(id)
 		if err == nil {
 			s.ui.SetStatus("Starting the helper on the GBA...", "busy")
 			if s.helper.Alive(8 * time.Second) {
+				s.helperLg = 0 // it should be in the language already; make sure (and old copies of the helper ignore it)
+				s.matchHelperLang()
 				s.cart = nil // the cart may have changed while it was off
 				s.ui.SetGBA("on")
 				if s.bridge != nil {
@@ -320,6 +344,11 @@ func (s *Session) run() {
 		s.ui.Finish("cancelled", "")
 		return
 	}
+	s.useCartClock()
+	if s.stopped.Load() { // the window was closed while the save was loading: don't start the game
+		s.ui.Finish("cancelled", "")
+		return
+	}
 	proc, err := s.startMGBA(mgba)
 	if err != nil {
 		s.ui.Ask(Prompt{Kind: "error", Title: "mGBA didn't start", Text: err.Error(), Buttons: []Button{{ID: "ok", Label: "OK", Style: "primary"}}})
@@ -337,6 +366,8 @@ func (s *Session) run() {
 
 	time.Sleep(500 * time.Millisecond)
 	s.ui.SetPhase("finish")
+	s.backupMGBASave() // a save made just before mGBA closed
+	s.trimSav()
 	if s.needsPush() {
 		s.markPending()
 		s.ui.SetStatus("Copying your save to the cartridge...", "busy")
@@ -374,8 +405,12 @@ func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 			s.ui.Log("GBA controller unavailable (%v).", err)
 		} else {
 			s.bridge = b
-			override := luaOverride(s.game.ROM, s.game.Code, func(f string, a ...any) { s.ui.Log(f, a...) })
-			lua = writeLua(b.port, override)
+			log := func(f string, a ...any) { s.ui.Log(f, a...) }
+			override := luaOverride(s.game.ROM, s.game.Code, log)
+			if override == "" {
+				override = foundOverride(s.game.ROM, s.game.Code, log)
+			}
+			lua = writeLua(b.port, override, luaTranslations(b.lang))
 		}
 	}
 	if lua == "" {
@@ -437,6 +472,7 @@ func (s *Session) watch(p *mgbaProc) {
 			continue
 		}
 		s.ui.Log("In-game save detected.")
+		s.backupMGBASave()
 		ok, err := s.push("")
 		s.linkMu.Unlock()
 		if err != nil {
@@ -468,10 +504,13 @@ var luaSource string
 
 // writeLua writes the mGBA script next to this app (easy to find when loading it by hand), or
 // in the settings folder, and returns its path.
-func writeLua(port int, override string) string {
+func writeLua(port int, override, translations string) string {
 	text := strings.ReplaceAll(luaSource, "__PORT__", strconv.Itoa(port))
 	if override != "" {
 		text = strings.Replace(text, "--@OVERRIDE@", "local OVERRIDE = "+override, 1)
+	}
+	if translations != "" {
+		text = strings.Replace(text, "--@LANG@", translations, 1)
 	}
 	var dirs []string
 	if exe, err := os.Executable(); err == nil {
@@ -520,6 +559,7 @@ type Bridge struct {
 	encNew      int              // wild Pokemon the script saw, not counted yet
 	encLast     string           // the last one: "ZIGZAGOON Lv3"
 	encShiny    bool
+	lang        byte // the game's language (lang.go): the status screens' text and font
 }
 
 func newBridge(s *Session) (*Bridge, error) {
@@ -530,7 +570,10 @@ func newBridge(s *Session) (*Bridge, error) {
 		}
 	}
 	b := &Bridge{s: s, ln: ln, port: ln.Addr().(*net.TCPAddr).Port, needShow: true, quit: make(chan struct{}),
-		screens: map[int]*screen{}, bgs: map[string]*stBg{}}
+		screens: map[int]*screen{}, bgs: map[string]*stBg{}, lang: 'E'}
+	if s.game != nil {
+		b.lang = gameLang(s.game.Code)
+	}
 	b.st.mode = modeFromKey(s.app.settings().StatusMode)
 	b.st.lastShown = b.st.mode
 	b.modeNow.v.Store(int32(b.st.mode))
@@ -708,7 +751,8 @@ func (b *Bridge) pollLoop() {
 // Called with linkMu held.
 func (b *Bridge) tryRestart() {
 	s := b.s
-	if err := s.link.Multiboot(helperImage, 50*time.Millisecond, nil); err != nil {
+	lang := s.helperLang()
+	if err := s.link.Multiboot(helperImageFor(lang), 50*time.Millisecond, nil); err != nil {
 		s.helper.Configure() // back to the helper's link timing
 		return
 	}
@@ -717,6 +761,8 @@ func (b *Bridge) tryRestart() {
 		s.ui.Log("The helper didn't start. Switch the GBA off, then on again holding START + SELECT.")
 		return
 	}
+	s.helperLg = 0 // it should be in the language already; make sure (and old copies of the helper ignore it)
+	s.matchHelperLang()
 	s.cart = nil
 	b.resync()
 	s.ui.SetGBA("on")

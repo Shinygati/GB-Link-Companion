@@ -218,6 +218,57 @@ func (u *UI) Ask(p Prompt) string {
 // Raise brings the window to the front (opens it again if it was closed).
 func (u *UI) Raise() { u.app.raise() }
 
+// CancelPrompt answers the open question with its way out (Cancel / Stop / the secondary
+// button), as if the player had chosen it. For when the window is closed under it.
+func (u *UI) CancelPrompt() {
+	u.mu.Lock()
+	p := u.st.Prompt
+	if p != nil && len(p.Buttons) > 0 {
+		pick := p.Buttons[len(p.Buttons)-1].ID
+		for _, b := range p.Buttons {
+			if b.Style == "secondary" {
+				pick = b.ID
+			}
+		}
+		for _, b := range p.Buttons {
+			if b.ID == "cancel" || b.ID == "stop" {
+				pick = b.ID
+			}
+		}
+		if _, done := u.answers[p.ID]; !done {
+			u.answers[p.ID] = pick
+		}
+		u.st.Prompt = nil
+	}
+	u.changed.Broadcast()
+	u.mu.Unlock()
+}
+
+// closeWhileBusy: the window was closed during a session. While the game runs or its save is
+// being written, that goes on in the background (the window comes back if it's needed). Before
+// the game has started there's nothing to wait for: the session stops, and the app quits. A
+// question left open is answered with its way out, so nothing waits for an answer nobody can
+// give (that kept the app running, unseen, in Task Manager).
+func (a *App) closeWhileBusy() {
+	a.mu.Lock()
+	s := a.session
+	a.mu.Unlock()
+	if s == nil {
+		os.Exit(0)
+	}
+	if ph := a.ui.Snapshot().Phase; ph != "play" && ph != "finish" {
+		s.stopped.Store(true)
+		if s.cancel != nil {
+			select {
+			case <-s.cancel:
+			default:
+				close(s.cancel)
+			}
+		}
+	}
+	a.ui.CancelPrompt()
+}
+
 // ------------------------------------------------------------------------------------ app
 type App struct {
 	ui      *UI
@@ -253,7 +304,7 @@ func (a *App) sessionEnded() {
 	closed := a.win == nil
 	a.winMu.Unlock()
 	if closed {
-		if a.ui.Snapshot().Result == "done" {
+		if r := a.ui.Snapshot().Result; r == "done" || r == "cancelled" || r == "pending" {
 			go func() { time.Sleep(300 * time.Millisecond); os.Exit(0) }()
 		} else {
 			a.raise()
