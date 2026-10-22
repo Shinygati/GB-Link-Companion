@@ -47,6 +47,15 @@ var iconPNG []byte
 //go:embed assets/gba.png
 var gbaPNG []byte
 
+// The cartridge shell drawn for each game (tools/mkcart.py), at two sizes so it scales down cleanly;
+// the game's label is painted into its label window.
+//
+//go:embed assets/cart_s.png
+var cartSmallPNG []byte
+
+//go:embed assets/cart_l.png
+var cartLargePNG []byte
+
 // ------------------------------------------------------------------------------- colours
 type palette struct {
 	bg, surface, surface2, text, muted, border      color.NRGBA
@@ -155,6 +164,8 @@ type Window struct {
 	pal      palette
 	logo     paint.ImageOp
 	gbaPhoto paint.ImageOp
+	cartS    paint.ImageOp
+	cartL    paint.ImageOp
 
 	st       State
 	selected string
@@ -230,6 +241,12 @@ func (a *App) openWindow() {
 	}
 	if img, err := png.Decode(bytes.NewReader(gbaPNG)); err == nil {
 		win.gbaPhoto = paint.NewImageOp(img)
+	}
+	if img, err := png.Decode(bytes.NewReader(cartSmallPNG)); err == nil {
+		win.cartS = paint.NewImageOp(img)
+	}
+	if img, err := png.Decode(bytes.NewReader(cartLargePNG)); err == nil {
+		win.cartL = paint.NewImageOp(img)
 	}
 	a.win = win
 	a.winMu.Unlock()
@@ -405,32 +422,65 @@ func column(gtx C, maxW unit.Dp, wd layout.Widget) D {
 }
 
 // cartArt: a little coloured cartridge with the game's initials.
+// cartLabels are the label colours of cartridges everyone knows by colour (by game code); other
+// games get a colour of their own from their code.
+var cartLabels = map[string]color.NRGBA{
+	"AXV": {196, 36, 52, 255}, // Ruby
+	"AXP": {36, 84, 196, 255}, // Sapphire
+	"BPE": {24, 150, 96, 255}, // Emerald
+	"BPR": {226, 88, 40, 255}, // FireRed
+	"BPG": {88, 170, 60, 255}, // LeafGreen
+}
+
+// cartArt draws a game as a GBA-shaped cartridge with its label colour and initials; size is its height.
 func (w *Window) cartArt(gtx C, g *GameView, size unit.Dp) D {
 	name, code := "?", ""
 	if g != nil {
 		name, code = g.Name, g.Code
 	}
-	wd, ht := gtx.Dp(size), gtx.Dp(size*1.13)
-	h := uint32(0)
-	key := code
-	if key == "" {
-		key = name
+	ht := gtx.Dp(size)
+	wd := ht * 8 / 5 // the cartridge is 1.6 times as wide as it is tall
+	shell := w.cartS
+	if wd > shell.Size().X {
+		shell = w.cartL
 	}
-	for _, c := range key {
-		h = h*31 + uint32(c)
+	if shell.Size().X > 0 {
+		sc := float32(wd) / float32(shell.Size().X)
+		t := op.Affine(f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(sc, sc))).Push(gtx.Ops)
+		c := clip.Rect{Max: shell.Size()}.Push(gtx.Ops)
+		shell.Filter = paint.FilterLinear
+		shell.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		c.Pop()
+		t.Pop()
 	}
-	base := hsl(float64(h%360), .55, .45)
-	fill(gtx, image.Pt(wd, ht), gtx.Dp(5), shade(base, .82))
-	fill(gtx, image.Pt(wd, ht-gtx.Dp(size*.12)), gtx.Dp(5), base)
-	in := gtx.Dp(size * .15)
-	st := op.Offset(image.Pt(in, in)).Push(gtx.Ops)
-	fill(gtx, image.Pt(wd-2*in, gtx.Dp(size*.48)), gtx.Dp(3), color.NRGBA{255, 255, 255, 56})
-	st.Pop()
+	// the label window (as drawn by tools/mkcart.py): x 0.095..0.855, y 0.255..0.845
+	label := image.Rect(wd*95/1000, ht*255/1000, wd*855/1000, ht*845/1000)
+	col, ok := color.NRGBA{}, false
+	if len(code) >= 3 {
+		col, ok = cartLabels[code[:3]]
+	}
+	if !ok {
+		h := uint32(0)
+		key := code
+		if key == "" {
+			key = name
+		}
+		for _, c := range key {
+			h = h*31 + uint32(c)
+		}
+		col = hsl(float64(h%360), .55, .45)
+	}
+	st := op.Offset(label.Min).Push(gtx.Ops)
+	r := max(1, ht*24/1000)
+	fill(gtx, label.Size(), r, col)
+	fill(gtx, image.Pt(label.Dx(), label.Dy()*36/100), r, color.NRGBA{255, 255, 255, 36}) // lighter top band
 	gtx2 := gtx
-	gtx2.Constraints = layout.Exact(image.Pt(wd, gtx.Dp(size*.78)))
+	gtx2.Constraints = layout.Exact(label.Size())
 	layout.Center.Layout(gtx2, func(gtx C) D {
-		return w.label(gtx, unit.Sp(float32(size)*.33), font.Bold, color.NRGBA{255, 255, 255, 255}, initials(name))
+		return w.label(gtx, unit.Sp(float32(size)*.36), font.Bold, color.NRGBA{255, 255, 255, 255}, initials(name))
 	})
+	st.Pop()
 	return D{Size: image.Pt(wd, ht)}
 }
 
@@ -439,7 +489,7 @@ func initials(name string) string {
 	var out []rune
 	for _, wd := range words {
 		switch strings.ToLower(wd) {
-		case "pokemon", "the", "of", "and", "version":
+		case "pokemon", "pokémon", "the", "of", "and", "version":
 			continue
 		}
 		out = append(out, unicode.ToUpper([]rune(wd)[0]))
@@ -605,6 +655,16 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 				a.ui.Toast(err.Error())
 			}
 		}()
+	}
+	if w.b("gbawc").Clicked(gtx) || w.b("gbawc-again").Clicked(gtx) {
+		go func() {
+			if err := a.gbaWonderCards(); err != nil {
+				a.ui.Toast(err.Error())
+			}
+		}()
+	}
+	if w.b("gbawc-done").Clicked(gtx) {
+		go a.stopGBAWonderCards()
 	}
 	if w.b("cancel-copy").Clicked(gtx) {
 		go a.cancelBackup()
@@ -936,8 +996,14 @@ func (w *Window) setupView() []layout.Widget {
 		folderText = folder
 	}
 	mg := "mGBA wasn't found. Press “Find mGBA…” and choose mGBA.exe."
+	if runtime.GOOS == "linux" {
+		mg = "mGBA wasn't found. Install it (your distribution's mgba-qt package, the Flatpak from Flathub, or the AppImage from mgba.io), or press “Find mGBA…”."
+	}
 	if st.MGBAFound {
 		mg = st.Settings.MGBA
+		if id, ok := strings.CutPrefix(mg, "flatpak:"); ok {
+			mg = "mGBA Flatpak (" + id + ")"
+		}
 	}
 	ad := "Not found yet - plug it in and it will show up here."
 	if st.Adapter != "" {
@@ -1073,6 +1139,10 @@ func (w *Window) homeHead(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx C) D { return w.label(gtx, 24, font.SemiBold, w.pal.text, "Choose a game") }),
 				layout.Rigid(func(gtx C) D {
+					return w.button(gtx, w.b("gbawc"), "ghost", "Wonder Cards on your GBA", false, icGamepad)
+				}),
+				layout.Rigid(gap(4)),
+				layout.Rigid(func(gtx C) D {
 					return w.button(gtx, w.b("backup"), "ghost", "Back up a cartridge", false, icDownload)
 				}))
 		}),
@@ -1126,7 +1196,7 @@ func (w *Window) gameRow(g GameView) layout.Widget {
 				return w.box(gtx, bg, border, 12, 0, func(gtx C) D {
 					return layout.Inset{Top: 10, Bottom: 10, Left: 14, Right: 14}.Layout(gtx, func(gtx C) D {
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx C) D { return w.cartArt(gtx, &g, 46) }),
+							layout.Rigid(func(gtx C) D { return w.cartArt(gtx, &g, 40) }),
 							layout.Rigid(gap(14)),
 							layout.Flexed(1, func(gtx C) D {
 								meta := []string{}
@@ -1196,7 +1266,7 @@ func (w *Window) playbar(gtx C) D {
 	dims := layout.Inset{Top: 12, Bottom: 12, Left: 24, Right: 24}.Layout(gtx, func(gtx C) D {
 		return column(gtx, 860, func(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx C) D { return w.cartArt(gtx, g, 38) }),
+				layout.Rigid(func(gtx C) D { return w.cartArt(gtx, g, 32) }),
 				layout.Rigid(gap(14)),
 				layout.Flexed(1, func(gtx C) D {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -1239,10 +1309,13 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 	if phase == "connect" {
 		phase = "load"
 	}
-	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup")
+	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup" || st.Result == "gbawc")
 	eyebrow := map[string]string{"load": "Getting ready", "play": "Now playing", "finish": "Saving to the cartridge"}[phase]
 	if st.Mode == "backup" {
 		eyebrow = map[string]string{"load": "Backing up a cartridge", "dump": "Backing up"}[phase]
+	}
+	if st.Mode == "gbawc" {
+		eyebrow = "Wonder Cards on your GBA"
 	}
 	if phase == "done" {
 		eyebrow = map[bool]string{true: "Finished", false: "Stopped"}[doneAll]
@@ -1250,7 +1323,7 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 	blocks := []layout.Widget{
 		func(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx C) D { return w.cartArt(gtx, st.Game, 64) }),
+				layout.Rigid(func(gtx C) D { return w.cartArt(gtx, st.Game, 56) }),
 				layout.Rigid(gap(16)),
 				layout.Flexed(1, func(gtx C) D {
 					name, sub := "", ""
@@ -1286,7 +1359,18 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 			})
 		})
 	}
-	if st.Phase == "play" {
+	if st.Phase == "play" && st.Mode == "gbawc" {
+		blocks = append(blocks, w.gbaWCStatus, w.wcCard, func(gtx C) D {
+			return layout.Inset{Top: 18}.Layout(gtx, func(gtx C) D {
+				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx C) D {
+						return w.centered(gtx, 13.5, font.Normal, w.pal.muted, "Play as usual, and save in the game to keep what the cards give you. The link cable stays in while you send cards.")
+					}),
+					layout.Rigid(gap(12)),
+					layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("gbawc-done"), "secondary", "Done", false, nil) }))
+			})
+		})
+	} else if st.Phase == "play" {
 		blocks = append(blocks, w.tiles)
 		blocks = append(blocks, w.wcCard)
 		c := st.Controller
@@ -1324,6 +1408,13 @@ func (w *Window) stepper(gtx C, mode, phase string, doneAll bool) D {
 	if mode == "backup" {
 		steps = []string{"Read the cartridge", "Copy the game", "Saved on this PC"}
 		cur = map[string]int{"load": 0, "dump": 1}[phase]
+	}
+	if mode == "gbawc" {
+		steps = []string{"Start Emerald on the GBA", "Walk around in the game", "Send Wonder Cards"}
+		cur = map[string]int{"load": 0, "play": 1}[phase]
+		if phase == "play" && (w.st.GBAWC == "ready" || w.st.GBAWC == "busy") {
+			cur = 2
+		}
 	}
 	if phase == "done" {
 		cur = -1
@@ -1619,6 +1710,11 @@ func (w *Window) doneCard(gtx C) D {
 		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Backed up!"
 	case "failed":
 		ibg, ifg, ic, title = w.pal.warnSoft, w.pal.warn, icWarn, "The backup didn't finish"
+		if st.Mode == "gbawc" {
+			title = "Wonder Cards stopped"
+		}
+	case "gbawc":
+		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Done"
 	}
 	type btn struct{ id, style, label string }
 	buttons := []btn{{"again", "primary", "Play again"}, {"home", "secondary", "Choose another game"}}
@@ -1627,11 +1723,15 @@ func (w *Window) doneCard(gtx C) D {
 		buttons = []btn{{"play-backup", "primary", "Play it now"}, {"show-backup", "secondary", "Show the file"}, {"home", "secondary", "Back to games"}}
 	case st.Mode == "backup":
 		buttons = []btn{{"backup-again", "primary", "Try again"}, {"home", "secondary", "Back to games"}}
+	case st.Mode == "gbawc":
+		buttons = []btn{{"gbawc-again", "primary", "Start again"}, {"home", "secondary", "Back to games"}}
 	}
 	if txt == "" && r == "cancelled" {
 		txt = "Nothing was changed on the cartridge."
 		if st.Mode == "backup" {
 			txt = "Nothing was saved."
+		} else if st.Mode == "gbawc" {
+			txt = "Nothing was sent to the GBA."
 		}
 	}
 	return layout.Inset{Top: 18}.Layout(gtx, func(gtx C) D {
@@ -1943,4 +2043,21 @@ func (w *Window) verifyBox(gtx C, v *Verify) D {
 					}))
 			}))
 	})
+}
+
+// gbaWCStatus: how Emerald on the GBA is doing (Wonder Cards on your GBA, wcgba.go).
+func (w *Window) gbaWCStatus(gtx C) D {
+	tone, title, txt := "", "Starting Emerald…", "Continue your game from the title screen and walk around: then the cards can be sent."
+	switch w.st.GBAWC {
+	case "ready":
+		tone, title, txt = "ok", "Ready", "You're walking around in Emerald: send a card whenever you like."
+	case "busy":
+		tone, title, txt = "ok", "Ready (you're busy in the game)", "A card you use now waits until you can move again; one you add goes in straight away."
+	case "away":
+		tone, title, txt = "warn", "Not now", "The GBA isn't answering: the link cable is out, or you're in a battle, a menu or another screen. "+
+			"Plug the cable back in and walk around in the game: it picks up again by itself."
+	case "nolink":
+		tone, title, txt = "warn", "GB-Link unplugged", "Plug the GB-Link adapter back in: it picks up again by itself. Emerald keeps running on the GBA."
+	}
+	return layout.Inset{Top: 18}.Layout(gtx, func(gtx C) D { return w.tile(gtx, tone, icGamepad, title, txt) })
 }

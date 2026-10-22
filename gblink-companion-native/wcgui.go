@@ -83,6 +83,10 @@ func (w *Window) wcCard(gtx C) D {
 		text = "Checking the ROM…"
 	case st.WCGame == "":
 		text = st.WCWhy
+	case st.Mode == "gbawc" && st.GBAWC != "ready" && st.GBAWC != "busy":
+		text = "Cards can be sent once you're walking around in the game."
+	case st.Mode == "gbawc":
+		text, can = "Send any of the GB-Link team's Wonder Cards to Emerald on your GBA: add one for the deliveryman to hand over, or use one right where you stand.", true
 	case !st.Controller.ScriptConnected:
 		text = "Waiting for mGBA's script (it sends the cards to the game)."
 	default:

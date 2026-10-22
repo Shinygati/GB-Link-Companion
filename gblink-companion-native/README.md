@@ -153,6 +153,19 @@ While you play, **Wonder Cards…** on the play screen lists every card from the
 - The ticks are remembered for each game.
 - Every language's Emerald, FireRed and LeafGreen, each with the cards made for it (the Japanese games: Use now only). Only the original games, checked against the No-Intro list of good dumps (a ROM hack or a bad dump can't take them: the cards' code is made for the exact ROMs). Load your game first; a card waits until you can walk around.
 
+## Wonder Cards on your GBA (retail English Emerald)
+
+**Wonder Cards on your GBA** (top of the game list) sends cards to Pokémon Emerald running on your real GBA, through the GB-Link, without mGBA:
+
+1. Press it, then with Emerald in the GBA hold **START and SELECT** while you switch it on. The app sends a small program; the screen flashes yellow, then green, and Emerald starts as usual. Your save isn't touched.
+2. Continue your game and walk around. The app shows **Ready**.
+3. **Wonder Cards…** works as it does in mGBA: **Use now** runs a card right where you stand, **Receive Wondercard** saves it for the deliveryman. Save in the game to keep what the cards give you.
+4. Press **Done** when you're finished; Emerald keeps running.
+
+The link cable stays in while you send cards. They go while you're walking around (not in a battle, a menu or the Cable Club: there the link port is the game's). Only the retail English cartridge (USA/Europe, the one revision there is): a red screen means the cartridge is another game, another language or a modified one.
+
+How it works: the program checks the cartridge, puts a small helper into spare memory and starts Emerald from just past the point where it clears that memory, with the helper chained onto the game's interrupts, so it runs alongside the game. That way into the game comes from [gen3-poke-multiplayer](https://github.com/Wired-Ariel/gen3-poke-multiplayer) by Wired-Ariel. The helper does what the mGBA script does with a card. Source: `b2s/emerald_wc` (`make`, then copy `emerald_wc_mb.gba` into `assets/`); `b2s/test/mgba_wc.c` runs it in mGBA behind a pretend GB-Link.
+
 ## Version and updates
 
 The version is shown beside the name at the top of the window. When the app starts it asks GitHub for the newest release of [Shinygati/GB-Link-Companion](https://github.com/Shinygati/GB-Link-Companion/releases); if it's newer, an **Update to v…** button appears at the top, which opens the release page. **Settings › Check for updates** checks again. To publish an update: change `appVersion` in `version.go`, build, and make a GitHub release whose tag is the same version (e.g. `v1.0.1`) with `GBLinkCompanion.exe` attached.
@@ -168,6 +181,23 @@ The version is shown beside the name at the top of the window. When the app star
 
 ---
 
+## On Linux
+
+Run `GBLinkCompanion-1.2.0-x86_64.AppImage` (make it executable first: `chmod +x`, or tick "Allow
+executing" in its properties). It works on any desktop Linux from about 2018 on (glibc 2.28 or newer).
+
+- **mGBA** is found by itself if it's installed from your distribution (`mgba-qt`), as an AppImage
+  (`mGBA-*.appimage` in ~/Applications, ~/Downloads, ~/Desktop, your home folder, or next to this
+  app), or as the Flatpak from Flathub (`io.mgba.mGBA`; the app gives it access to your game's folder).
+  Otherwise press "Find mGBA…" in Settings.
+- **mGBA 0.10** (what most distributions ship) can't load the GBA-controller script by itself:
+  the app then shows how to load it from Tools › Scripting. mGBA 0.11 / development builds load it
+  automatically.
+- **The GB-Link adapter**: if Linux won't let the app open it, add yourself to the group that owns
+  serial ports and log in again: `sudo usermod -aG dialout $USER` (on Arch and some others: `uucp`).
+- **File pickers** use zenity (GNOME and most desktops) or kdialog (KDE).
+- The app follows your desktop's dark style.
+
 ## Building from source
 
 You need Go 1.24 or newer.
@@ -175,6 +205,8 @@ You need Go 1.24 or newer.
 ```
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H windowsgui" -o GBLinkCompanion.exe .
 ```
+
+The Linux AppImage: `packaging/linux/build-appimage.sh` (what it needs is listed at its top).
 
 The GBA helper (`assets/gblink_companion_mb.gba`) and the mGBA script (`assets/gblink_controller.lua`) are built into the app. To change the helper, build it from `b2s/gba` with devkitARM or `arm-none-eabi-gcc` and `gbafix` on your PATH, then copy it into `assets/` before building the app:
 
@@ -210,6 +242,7 @@ cp ../b2s/gba/gblink_companion_mb.gba assets/
 
 ## Credits
 
+- **Wonder Cards on your GBA:** the way into a running Emerald (start-up hand-off and interrupt hook) from [gen3-poke-multiplayer](https://github.com/Wired-Ariel/gen3-poke-multiplayer) by Wired-Ariel (GPL-3.0).
 - **Multiboot:** ported from [GB-Link Multiboot Web](https://github.com/GB-Link/gba-multiboot-web) (GPL-3.0).
 - **GBA helper:** the Burn2Slot for GB-Link flasher. Its save code follows [GB-Link Cart Doctor](https://github.com/GB-Link/gb-cart-doctor-web), and its ROM flashing comes from [Burn2Slot](https://github.com/vrodin/Burn2Slot).
 - **Game database:** [No-Intro](https://no-intro.org)'s Game Boy Advance DAT (built in from the copy in [libretro-database](https://github.com/libretro/libretro-database)).

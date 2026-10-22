@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,21 @@ type GBLink struct {
 	cond   *sync.Cond
 	frames [][]byte
 	closed bool
+	broken bool // the adapter was unplugged (or stopped responding): every exchange fails straight away
+}
+
+// Broken says the adapter has gone: unplugged, or not answering. A new connection is needed.
+func (l *GBLink) Broken() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.broken
+}
+
+func (l *GBLink) setBroken() {
+	l.mu.Lock()
+	l.broken = true
+	l.cond.Broadcast()
+	l.mu.Unlock()
 }
 
 // FindGBLinkPort returns the serial port of the first GB-Link adapter plugged in.
@@ -62,6 +78,10 @@ func FindGBLinkPort() string {
 func OpenGBLink(name string) (*GBLink, error) {
 	p, err := serial.Open(name, &serial.Mode{BaudRate: 115200})
 	if err != nil {
+		if runtime.GOOS == "linux" && strings.Contains(strings.ToLower(err.Error()), "permission denied") {
+			return nil, linkErr("Linux didn't let this app open the GB-Link adapter (%s). Add yourself to the group "+
+				"that owns it - usually: sudo usermod -aG dialout $USER (on Arch: uucp) - then log out and back in.", name)
+		}
 		return nil, linkErr("Couldn't open the GB-Link adapter on %s (%v). Is another program using it?", name, err)
 	}
 	p.SetReadTimeout(50 * time.Millisecond)
@@ -81,6 +101,7 @@ func (l *GBLink) Close() {
 func (l *GBLink) readLoop() {
 	buf := make([]byte, 0, 4096)
 	chunk := make([]byte, 4096)
+	fails := 0
 	for {
 		n, err := l.port.Read(chunk)
 		l.mu.Lock()
@@ -90,9 +111,14 @@ func (l *GBLink) readLoop() {
 			return
 		}
 		if err != nil {
+			if fails++; fails >= 10 { // half a second of errors: the adapter was unplugged
+				l.setBroken()
+				return
+			}
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
+		fails = 0
 		if n == 0 {
 			continue
 		}
@@ -131,10 +157,23 @@ func (l *GBLink) readLoop() {
 }
 
 func (l *GBLink) writeFrame(channel byte, payload []byte) error {
+	if l.Broken() {
+		return linkErr("The GB-Link adapter was unplugged or stopped responding")
+	}
 	f := append([]byte{'G', 'B', channel, byte(len(payload)), byte(len(payload) >> 8)}, payload...)
-	_, err := l.port.Write(f)
-	if err != nil {
-		return linkErr("The GB-Link adapter was unplugged or stopped responding (%v)", err)
+	// On Windows, writing to an adapter that has been unplugged can hang rather than fail: give up
+	// after a while and treat it as unplugged.
+	done := make(chan error, 1)
+	go func() { _, err := l.port.Write(f); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			l.setBroken()
+			return linkErr("The GB-Link adapter was unplugged or stopped responding (%v)", err)
+		}
+	case <-time.After(2 * time.Second):
+		l.setBroken()
+		return linkErr("The GB-Link adapter was unplugged or stopped responding")
 	}
 	return nil
 }
@@ -163,8 +202,14 @@ func (l *GBLink) Exchange(tx []byte, timeout time.Duration) ([]byte, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for len(out) < len(tx) {
+		if l.broken {
+			return nil, linkErr("The GB-Link adapter was unplugged or stopped responding")
+		}
 		if len(l.frames) == 0 {
 			if time.Now().After(deadline) {
+				// the adapter answers every word, GBA or not: silence means this connection is dead
+				// (unplugged, or plugged in again as a new one)
+				l.broken = true
 				return nil, linkErr("No response from the GB-Link adapter")
 			}
 			l.cond.Wait()
@@ -207,6 +252,10 @@ func (l *GBLink) word(w uint32) (uint32, error) {
 // ----------------------------------------------------------------------------- multiboot
 var errNoGBA = errors.New("no GBA waiting for multiboot")
 
+// errEmeraldWCRunning: instead of a GBA waiting for multiboot, Emerald is already running with
+// Wonder Cards (wcgba.go): its program answered.
+var errEmeraldWCRunning = errors.New("Emerald with Wonder Cards is already running")
+
 // Multiboot sends a program to a GBA waiting in its BIOS (switched on holding START + SELECT).
 // Port of GB-Link's multiboot.js. Returns errNoGBA if no GBA answered within wait.
 func (l *GBLink) Multiboot(data []byte, wait time.Duration, cancel func() bool) error {
@@ -231,6 +280,9 @@ func (l *GBLink) Multiboot(data []byte, wait time.Duration, cancel func() bool) 
 		}
 		if r>>16 == 0x7202 {
 			break
+		}
+		if r>>24 == 0xA5 { // Emerald's Wonder Card program, already running
+			return errEmeraldWCRunning
 		}
 		if time.Now().After(deadline) {
 			return errNoGBA

@@ -37,7 +37,7 @@ func main() {
 	a := &App{set: loadSettings()}
 	if a.set.MGBA == "" {
 		a.set.MGBA = DefaultMGBA()
-	} else if _, err := os.Stat(a.set.MGBA); err != nil {
+	} else if !mgbaExists(a.set.MGBA) {
 		if d := DefaultMGBA(); d != "" {
 			a.set.MGBA = d
 		}

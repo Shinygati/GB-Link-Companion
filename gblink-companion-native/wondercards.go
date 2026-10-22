@@ -1,4 +1,5 @@
-// Wonder Cards for Pokémon Emerald, FireRed and LeafGreen, sent to the game running in mGBA.
+// Wonder Cards for Pokémon Emerald, FireRed and LeafGreen, sent to the game running in mGBA (or, for
+// retail English Emerald, straight to a real GBA: wcgba.go).
 //
 // The cards are the GB-Link team's (https://github.com/GB-Link/gblink-wondercards, GPL-3.0):
 // every card of their page, as .wc3 files for every language's games, in assets/wondercards (one
@@ -125,9 +126,25 @@ func wc3Parts(b []byte) (card, icon, data []byte, err error) {
 	return card, icon, data, nil
 }
 
-// sendWonderCard asks the mGBA script to add the card to the game ("add"), use it now ("use"),
-// or use it now in place of the card that keeps running ("replace").
-func (b *Bridge) sendWonderCard(c WonderCard, how string) error {
+// wcSender is what a card is sent with: the mGBA script (Bridge), or the payload running inside
+// Emerald on a real GBA (wcgba.go). The queue, the answers and what the player sees are the same.
+type wcSender struct {
+	mu       sync.Mutex
+	ui       *UI
+	next     int
+	sent     map[int]wcRequest
+	queue    []WonderCard // cards waiting to be used, one after another
+	busy     bool         // a card is being used now
+	resident string       // the card that keeps running, as far as this app knows
+	// transmit sends one card; how: "add", "use" or "replace". It reports back through reply().
+	transmit func(id int, c WonderCard, how string, card, icon, data []byte) error
+	// noAnswer: what to tell the player when nothing at all comes back
+	noAnswer string
+}
+
+// sendWonderCard adds the card to the game ("add"), uses it now ("use"), or uses it now in place of
+// the card that keeps running ("replace").
+func (w *wcSender) sendWonderCard(c WonderCard, how string) error {
 	raw, err := wcFS.ReadFile(path.Join("assets/wondercards", c.File))
 	if err != nil {
 		return err
@@ -136,23 +153,164 @@ func (b *Bridge) sendWonderCard(c WonderCard, how string) error {
 	if err != nil {
 		return err
 	}
-	b.mu.Lock()
-	b.wcNext++
-	id := b.wcNext
-	if b.wcSent == nil {
-		b.wcSent = map[int]wcRequest{}
+	w.mu.Lock()
+	w.next++
+	id := w.next
+	if w.sent == nil {
+		w.sent = map[int]wcRequest{}
 	}
-	b.wcSent[id] = wcRequest{card: c, how: how}
+	w.sent[id] = wcRequest{card: c, how: how}
+	w.mu.Unlock()
+	if err := w.transmit(id, c, how, card, icon, data); err != nil {
+		w.mu.Lock()
+		delete(w.sent, id)
+		w.mu.Unlock()
+		return err
+	}
+	go func() { // no word at all: say so, rather than "Sending…" for ever
+		time.Sleep(8 * time.Second)
+		w.mu.Lock()
+		req, waiting := w.sent[id]
+		if waiting && !req.heard {
+			delete(w.sent, id)
+			w.busy, w.queue = false, nil
+		}
+		w.mu.Unlock()
+		if waiting && !req.heard {
+			w.ui.update(func(st *State) { st.WCStatus = w.noAnswer })
+		}
+	}()
+	return nil
+}
+
+// useWonderCards uses cards one after another (each waits for the one before to finish).
+func (w *wcSender) useWonderCards(cards []WonderCard) error {
+	w.mu.Lock()
+	w.queue = append(w.queue, cards...)
+	busy := w.busy
+	w.mu.Unlock()
+	if busy {
+		return nil
+	}
+	return w.nextUse()
+}
+
+func (w *wcSender) nextUse() error {
+	w.mu.Lock()
+	if len(w.queue) == 0 {
+		w.busy = false
+		w.mu.Unlock()
+		return nil
+	}
+	c := w.queue[0]
+	w.queue = w.queue[1:]
+	w.busy = true
+	w.mu.Unlock()
+	if err := w.sendWonderCard(c, "use"); err != nil {
+		w.mu.Lock()
+		w.busy, w.queue = false, nil
+		w.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// replace uses the card in place of the one that keeps running.
+func (w *wcSender) replace(c WonderCard) error {
+	w.mu.Lock()
+	busy := w.busy
+	if !busy {
+		w.busy = true
+	}
+	w.mu.Unlock()
+	if busy {
+		return fmt.Errorf("another card is being used: wait for it to finish")
+	}
+	if err := w.sendWonderCard(c, "replace"); err != nil {
+		w.mu.Lock()
+		w.busy = false
+		w.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+type wcRequest struct {
+	card  WonderCard
+	how   string
+	heard bool // an answer came (the card may still be waiting for the game)
+}
+
+// reply: an answer for card id: "ok", "no" (text says why), "wait" (waiting for the player to be
+// free to move) or "busy" (another card that keeps running is on; text names it if known).
+func (w *wcSender) reply(id int, status, text string) {
+	w.mu.Lock()
+	req, ok := w.sent[id]
+	if status != "wait" {
+		delete(w.sent, id)
+	} else if ok {
+		req.heard = true
+		w.sent[id] = req
+	}
+	if ok && status == "ok" && req.how != "add" && req.card.Resident {
+		w.resident = req.card.Label
+	}
+	w.mu.Unlock()
+	if !ok {
+		return
+	}
+	ui := w.ui
+	name := req.card.Label
+	if req.how != "add" && status != "wait" {
+		defer func() {
+			if status != "ok" { // stop the rest: they may need this one
+				w.mu.Lock()
+				w.queue = nil
+				w.mu.Unlock()
+			}
+			w.nextUse()
+		}()
+	}
+	switch {
+	case status == "wait":
+		ui.update(func(st *State) {
+			st.WCStatus = "Waiting for you to be free to move in the game, to use " + name + "…"
+		})
+	case status == "busy": // another card that keeps running is on: offer to replace it
+		on := text
+		if on == "" {
+			on = "Another card that keeps running"
+		}
+		c := req.card
+		ui.update(func(st *State) {
+			st.WCStatus = on + " is on until the game is reset, and only one can run at a time. Replace it with " + name + "?"
+			st.WCReplace = &c
+		})
+	case status == "ok" && req.how != "add":
+		ui.Log("Used the Wonder Card %s.", name)
+		ui.update(func(st *State) { st.WCStatus = "Used " + name + "." })
+		ui.Toast("Used " + name)
+	case status == "ok":
+		ui.Log("Received the Wonder Card %s. Talk to the deliveryman on Pokémon Center 2F (go in again if you're there), and save in the game to keep it.", name)
+		ui.update(func(st *State) {
+			st.WCStatus = "Received " + name + ". Talk to the deliveryman in green on any Pokémon Center's 2F, and save in the game to keep the card."
+		})
+		ui.Toast("Received " + name)
+	default:
+		ui.Log("Wonder Card %s: %s", name, text)
+		ui.update(func(st *State) { st.WCStatus = text })
+	}
+}
+
+// mGBA: the script's line "W<A|U><id>,<card hex>,<icon hex>,<script data hex>,<resident 0/1/2>,<label>"
+func (b *Bridge) wcTransmit(id int, c WonderCard, how string, card, icon, data []byte) error {
+	b.mu.Lock()
 	connected, canWC := len(b.clients) > 0, b.scriptWC
 	b.mu.Unlock()
 	if !connected {
-		delete(b.wcSent, id)
 		return fmt.Errorf("mGBA's script isn't connected")
 	}
 	if !canWC {
-		b.mu.Lock()
-		delete(b.wcSent, id)
-		b.mu.Unlock()
 		return fmt.Errorf("mGBA is running an older copy of the script, without Wonder Cards. In mGBA, load gblink_controller.lua again " +
 			"(Tools › Scripting… › File › Load script…) from where this app shows it, or close mGBA and press Play again")
 	}
@@ -169,63 +327,10 @@ func (b *Bridge) sendWonderCard(c WonderCard, how string) error {
 	label := strings.NewReplacer("\n", " ", "\t", " ", ",", " ").Replace(c.Label)
 	b.writeAll([]byte(fmt.Sprintf("W%s%d,%s,%s,%s,%s,%s\n", mode, id, hex.EncodeToString(card), hex.EncodeToString(icon),
 		hex.EncodeToString(data), res, label)))
-	go func() { // no word from the script at all: say so, rather than "Sending…" for ever
-		time.Sleep(8 * time.Second)
-		b.mu.Lock()
-		req, waiting := b.wcSent[id]
-		if waiting && !req.heard {
-			delete(b.wcSent, id)
-			b.wcBusy, b.wcQueue = false, nil
-		}
-		b.mu.Unlock()
-		if waiting && !req.heard {
-			b.s.ui.update(func(st *State) {
-				st.WCStatus = "No answer from mGBA's script. Load gblink_controller.lua again in mGBA (Tools › Scripting… › File › Load script…), then try again."
-			})
-		}
-	}()
 	return nil
 }
 
-// useWonderCards uses cards one after another (each waits for the one before to finish).
-func (b *Bridge) useWonderCards(cards []WonderCard) error {
-	b.mu.Lock()
-	b.wcQueue = append(b.wcQueue, cards...)
-	busy := b.wcBusy
-	b.mu.Unlock()
-	if busy {
-		return nil
-	}
-	return b.wcNextUse()
-}
-
-func (b *Bridge) wcNextUse() error {
-	b.mu.Lock()
-	if len(b.wcQueue) == 0 {
-		b.wcBusy = false
-		b.mu.Unlock()
-		return nil
-	}
-	c := b.wcQueue[0]
-	b.wcQueue = b.wcQueue[1:]
-	b.wcBusy = true
-	b.mu.Unlock()
-	if err := b.sendWonderCard(c, "use"); err != nil {
-		b.mu.Lock()
-		b.wcBusy, b.wcQueue = false, nil
-		b.mu.Unlock()
-		return err
-	}
-	return nil
-}
-
-type wcRequest struct {
-	card  WonderCard
-	how   string
-	heard bool // the script answered (it may still be waiting for the game)
-}
-
-// wcReply: the script's answer "w<id>\t<ok|no|wait>\t<text>".
+// wcReply: the script's answer "w<id>\t<ok|no|wait|busy>\t<text>".
 func (b *Bridge) wcReply(line string) {
 	f := strings.SplitN(line[1:], "\t", 3)
 	if len(f) < 2 {
@@ -237,75 +342,29 @@ func (b *Bridge) wcReply(line string) {
 	if len(f) == 3 {
 		text = f[2]
 	}
-	b.mu.Lock()
-	req, ok := b.wcSent[id]
-	if f[1] != "wait" {
-		delete(b.wcSent, id)
-	} else if ok {
-		req.heard = true
-		b.wcSent[id] = req
-	}
-	b.mu.Unlock()
-	if !ok {
-		return
-	}
-	ui := b.s.ui
-	name := req.card.Label
-	if req.how != "add" && f[1] != "wait" {
-		defer func() {
-			if f[1] != "ok" { // stop the rest: they may need this one
-				b.mu.Lock()
-				b.wcQueue = nil
-				b.mu.Unlock()
-			}
-			b.wcNextUse()
-		}()
-	}
-	switch {
-	case f[1] == "wait":
-		ui.update(func(st *State) {
-			st.WCStatus = "Waiting for you to be free to move in the game, to use " + name + "…"
-		})
-	case f[1] == "busy": // another card that keeps running is on: offer to replace it
-		on := text
-		if on == "" {
-			on = "Another card that keeps running"
-		}
-		c := req.card
-		ui.update(func(st *State) {
-			st.WCStatus = on + " is on until the game is reset, and only one can run at a time. Replace it with " + name + "?"
-			st.WCReplace = &c
-		})
-	case f[1] == "ok" && req.how != "add":
-		ui.Log("Used the Wonder Card %s.", name)
-		ui.update(func(st *State) { st.WCStatus = "Used " + name + "." })
-		ui.Toast("Used " + name)
-	case f[1] == "ok":
-		ui.Log("Received the Wonder Card %s. Talk to the deliveryman on Pokémon Center 2F (go in again if you're there), and save in the game to keep it.", name)
-		ui.update(func(st *State) {
-			st.WCStatus = "Received " + name + ". Talk to the deliveryman in green on any Pokémon Center's 2F, and save in the game to keep the card."
-		})
-		ui.Toast("Received " + name)
-	default:
-		ui.Log("Wonder Card %s: %s", name, text)
-		ui.update(func(st *State) { st.WCStatus = text })
-	}
+	b.wc.reply(id, f[1], text)
 }
 
-// wcSession: the running game, if it can take Wonder Cards now (else says why).
-func (a *App) wcSession() *Session {
+// wcTarget: what the running game's cards go to (mGBA's script or the GBA), if it can take
+// Wonder Cards now (else says why).
+func (a *App) wcTarget() *wcSender {
 	a.mu.Lock()
 	s := a.session
 	a.mu.Unlock()
-	if s == nil || s.bridge == nil {
+	var w *wcSender
+	if s != nil && s.gbawc != nil {
+		w = &s.gbawc.wc
+	} else if s != nil && s.bridge != nil {
+		if key, why := wcCheckROM(s.game); key == "" {
+			a.ui.update(func(st *State) { st.WCStatus = why })
+			return nil
+		}
+		w = &s.bridge.wc
+	}
+	if w == nil {
 		a.ui.update(func(st *State) { st.WCStatus = "Start the game first." })
-		return nil
 	}
-	if key, why := wcCheckROM(s.game); key == "" {
-		a.ui.update(func(st *State) { st.WCStatus = why })
-		return nil
-	}
-	return s
+	return w
 }
 
 // useWonderCards: the window's "Use now", for the ticked cards.
@@ -322,11 +381,11 @@ func (a *App) useWonderCards(cards []WonderCard) {
 		})
 		return
 	}
-	s := a.wcSession()
-	if s == nil {
+	w := a.wcTarget()
+	if w == nil {
 		return
 	}
-	if err := s.bridge.useWonderCards(cards); err != nil {
+	if err := w.useWonderCards(cards); err != nil {
 		a.ui.update(func(st *State) { st.WCStatus = "Couldn't send it: " + err.Error() + "." })
 	}
 }
@@ -334,35 +393,22 @@ func (a *App) useWonderCards(cards []WonderCard) {
 // replaceWonderCard: the window's "Replace": use the card in place of the one that keeps running.
 func (a *App) replaceWonderCard(c WonderCard) {
 	a.ui.update(func(st *State) { st.WCReplace, st.WCStatus = nil, "Sending "+c.Label+"…" })
-	s := a.wcSession()
-	if s == nil {
+	w := a.wcTarget()
+	if w == nil {
 		return
 	}
-	s.bridge.mu.Lock()
-	busy := s.bridge.wcBusy
-	if !busy {
-		s.bridge.wcBusy = true
-	}
-	s.bridge.mu.Unlock()
-	if busy {
-		a.ui.update(func(st *State) { st.WCStatus = "Another card is being used: wait for it to finish." })
-		return
-	}
-	if err := s.bridge.sendWonderCard(c, "replace"); err != nil {
-		s.bridge.mu.Lock()
-		s.bridge.wcBusy = false
-		s.bridge.mu.Unlock()
+	if err := w.replace(c); err != nil {
 		a.ui.update(func(st *State) { st.WCStatus = "Couldn't send it: " + err.Error() + "." })
 	}
 }
 
 // addWonderCard: the window's "Receive Wondercard" (a game keeps one card).
 func (a *App) addWonderCard(c WonderCard) {
-	s := a.wcSession()
-	if s == nil {
+	w := a.wcTarget()
+	if w == nil {
 		return
 	}
-	if err := s.bridge.sendWonderCard(c, "add"); err != nil {
+	if err := w.sendWonderCard(c, "add"); err != nil {
 		a.ui.update(func(st *State) { st.WCStatus = "Couldn't send it: " + err.Error() + "." })
 	}
 }
@@ -374,6 +420,9 @@ func (a *App) chooseWonderCards(labels []string) {
 	s := a.session
 	a.mu.Unlock()
 	if s == nil {
+		return
+	}
+	if s.game == nil { // a GBA's own Emerald: nothing on this PC to remember it in
 		return
 	}
 	s.linkMu.Lock()

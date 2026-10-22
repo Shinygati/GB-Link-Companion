@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=GB-Link Companion
+Comment=Play in mGBA with the save on your real cartridge
+Exec=GBLinkCompanion
+Icon=gblinkcompanion
+Categories=Game;Emulator;
+Terminal=false
+StartupWMClass=GBLinkCompanion

@@ -34,6 +34,7 @@ type Session struct {
 	cart       []byte     // what we know is on the cart (nil = unknown)
 	saveType   int
 	bridge     *Bridge
+	gbawc      *gbaWC        // Wonder Cards on a real GBA (wcgba.go)
 	stopped    atomic.Bool   // the window was closed before the game started: stop (closeWhileBusy)
 	cancel     chan struct{} // closed when the player cancels a backup
 	helperLg   byte          // the language the helper's text is in now (0: not known)
@@ -387,9 +388,22 @@ type mgbaProc struct {
 }
 
 func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
+	var lua string
 	start := func(args ...string) (*mgbaProc, error) {
-		cmd := exec.Command(mgba, append(args, s.game.ROM)...)
-		cmd.Dir = filepath.Dir(mgba)
+		name, dir := mgba, filepath.Dir(mgba)
+		var pre []string
+		if id, ok := strings.CutPrefix(mgba, "flatpak:"); ok {
+			// mGBA's Flatpak only sees its own files: let it use the game's folder (the ROM, the .sav
+			// and the backups) and the controller script's folder, and talk to this app over localhost
+			name, dir = "flatpak", ""
+			pre = []string{"run", "--filesystem=" + filepath.Dir(s.game.ROM), "--share=network"}
+			if lua != "" {
+				pre = append(pre, "--filesystem="+filepath.Dir(lua))
+			}
+			pre = append(pre, id)
+		}
+		cmd := exec.Command(name, append(append(pre, args...), s.game.ROM)...)
+		cmd.Dir = dir
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
@@ -398,7 +412,6 @@ func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 		return p, nil
 	}
 	set := s.app.settings()
-	var lua string
 	if set.Controller {
 		b, err := newBridge(s)
 		if err != nil {
@@ -549,11 +562,8 @@ type Bridge struct {
 	game        string      // the Pokemon game the mGBA script found ("" = none yet)
 	gameProblem string      // why the script can't read this game
 	noRNG       bool        // the game has no RNG screen (your own builds)
-	wcNext      int         // Wonder Cards sent to the script (wondercards.go)
-	wcSent      map[int]wcRequest
-	wcQueue     []WonderCard // cards waiting to be used, one after another
-	wcBusy      bool         // a card is being used now
-	scriptWC    bool         // the script in mGBA knows Wonder Cards (said so in its hello)
+	wc          wcSender    // Wonder Cards sent to the script (wondercards.go)
+	scriptWC    bool        // the script in mGBA knows Wonder Cards (said so in its hello)
 	screens     map[int]*screen
 	bgs         map[string]*stBg // region map pictures from the script, by region
 	encNew      int              // wild Pokemon the script saw, not counted yet
@@ -574,6 +584,8 @@ func newBridge(s *Session) (*Bridge, error) {
 	if s.game != nil {
 		b.lang = gameLang(s.game.Code)
 	}
+	b.wc = wcSender{ui: s.ui, transmit: b.wcTransmit,
+		noAnswer: "No answer from mGBA's script. Load gblink_controller.lua again in mGBA (Tools › Scripting… › File › Load script…), then try again."}
 	b.st.mode = modeFromKey(s.app.settings().StatusMode)
 	b.st.lastShown = b.st.mode
 	b.modeNow.v.Store(int32(b.st.mode))

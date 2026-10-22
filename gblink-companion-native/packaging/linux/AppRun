@@ -1,0 +1,4 @@
+#!/bin/sh
+# GB-Link Companion AppImage: everything it needs from the system (X11/Wayland, EGL) is on any desktop.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/GBLinkCompanion" "$@"

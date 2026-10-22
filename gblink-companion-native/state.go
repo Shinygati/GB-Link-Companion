@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -82,6 +83,7 @@ type State struct {
 	Toast      string
 	ToastUntil time.Time
 	WCGame     string      // the game's Wonder Card folder (wondercards.go), "" if it can't take them
+	GBAWC      string      // Wonder Cards on a real GBA (wcgba.go): starting, ready, busy, away
 	WCWhy      string      // ...and why not
 	WCStatus   string      // what happened to the last card sent
 	WCChosen   []string    // the cards ticked in the list (remembered for the game)
@@ -304,7 +306,7 @@ func (a *App) sessionEnded() {
 	closed := a.win == nil
 	a.winMu.Unlock()
 	if closed {
-		if r := a.ui.Snapshot().Result; r == "done" || r == "cancelled" || r == "pending" {
+		if r := a.ui.Snapshot().Result; r == "done" || r == "cancelled" || r == "pending" || r == "gbawc" {
 			go func() { time.Sleep(300 * time.Millisecond); os.Exit(0) }()
 		} else {
 			a.raise()
@@ -465,7 +467,11 @@ func (a *App) browse(what string) {
 	case "folder":
 		path, err = pickFolder("Choose the folder with your GBA games")
 	case "mgba":
-		path, err = pickFile("Find mGBA", "mGBA (mGBA.exe)", "*.exe", filepath.Dir(a.settings().MGBA))
+		if runtime.GOOS == "windows" {
+			path, err = pickFile("Find mGBA", "mGBA (mGBA.exe)", "*.exe", filepath.Dir(a.settings().MGBA))
+		} else {
+			path, err = pickFile("Find mGBA (mgba-qt or an mGBA AppImage)", "mGBA", "*", filepath.Dir(a.settings().MGBA))
+		}
 	default:
 		path, err = pickFile("Choose a GBA game", "GBA games (*.gba)", "*.gba", a.settings().GamesFolder)
 	}

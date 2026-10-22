@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -85,14 +86,82 @@ func DefaultMGBA() string {
 	} else if runtime.GOOS == "darwin" {
 		cands = append(cands, "/Applications/mGBA.app/Contents/MacOS/mGBA")
 	} else {
+		// the distro's package, then an mGBA AppImage in the usual places, then the Flatpak
+		if p, err := exec.LookPath("mgba-qt"); err == nil {
+			cands = append(cands, p)
+		}
 		cands = append(cands, "/usr/bin/mgba-qt", "/usr/local/bin/mgba-qt", "/usr/games/mgba-qt")
+		cands = append(cands, mgbaAppImages()...)
 	}
 	for _, c := range cands {
 		if st, err := os.Stat(c); err == nil && !st.IsDir() {
 			return c
 		}
 	}
+	if runtime.GOOS == "linux" && flatpakInstalled(mgbaFlatpak) {
+		return "flatpak:" + mgbaFlatpak
+	}
 	return ""
+}
+
+// mgbaFlatpak is mGBA's Flatpak (Flathub). The mGBA setting is then "flatpak:" + this ID.
+const mgbaFlatpak = "io.mgba.mGBA"
+
+// mgbaExists says whether the mGBA setting still points at an mGBA.
+func mgbaExists(mgba string) bool {
+	if id, ok := strings.CutPrefix(mgba, "flatpak:"); ok {
+		return flatpakInstalled(id)
+	}
+	st, err := os.Stat(mgba)
+	return err == nil && !st.IsDir()
+}
+
+func flatpakInstalled(id string) bool {
+	dirs := []string{"/var/lib/flatpak/app"}
+	if h, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(h, ".local", "share", "flatpak", "app"))
+	}
+	for _, d := range dirs {
+		if st, err := os.Stat(filepath.Join(d, id)); err == nil && st.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// mgbaAppImages lists mGBA AppImages (mGBA-0.10.5-appimage-x64.appimage and the like) next to this
+// app and in the folders people keep AppImages in, newest name first.
+func mgbaAppImages() []string {
+	var dirs []string
+	if a := os.Getenv("APPIMAGE"); a != "" { // this app is an AppImage: look next to it
+		dirs = append(dirs, filepath.Dir(a))
+	}
+	if exe, err := os.Executable(); err == nil {
+		dirs = append(dirs, filepath.Dir(exe))
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		for _, d := range []string{"Applications", "AppImages", ".local/bin", "bin", "Downloads", "Desktop", ""} {
+			dirs = append(dirs, filepath.Join(h, d))
+		}
+	}
+	dirs = append(dirs, "/opt", "/opt/mgba")
+	var out []string
+	for _, d := range dirs {
+		ents, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		var found []string
+		for _, e := range ents {
+			n := strings.ToLower(e.Name())
+			if strings.HasPrefix(n, "mgba") && strings.HasSuffix(n, ".appimage") {
+				found = append(found, filepath.Join(d, e.Name()))
+			}
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(found)))
+		out = append(out, found...)
+	}
+	return out
 }
 
 // ------------------------------------------------------------------------------ the game
