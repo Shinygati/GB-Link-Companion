@@ -1,4 +1,6 @@
 // GB-Link Companion: play GBA games in mGBA with the save on your real cartridge.
+//
+//go:generate goversioninfo
 package main
 
 import (
