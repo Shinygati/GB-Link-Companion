@@ -88,7 +88,7 @@ Wonder Cards only work with the original English games, checked against No-Intro
 
 ---
 
-## Building from source
+## Building from source Windows
 
 The app is written in Go with the [Gio](https://gioui.org) UI toolkit. You need Go 1.24 or newer:
 
@@ -105,6 +105,35 @@ The GBA helper program and the mGBA script are built into the app from `gblink-c
 make -C b2s/gba
 cp b2s/gba/gblink_sync_mb.gba gblink-companion-native/assets/
 ```
+
+## Building from source Linux
+
+### Linux
+
+Install [Go 1.24 or newer](https://go.dev/dl/), then open a terminal in the repository folder and run:
+
+```bash
+cd gblink-companion-native
+go build -o GBLinkCompanion .
+```
+
+This creates the Linux executable `GBLinkCompanion`. Run it with:
+
+```bash
+./GBLinkCompanion
+```
+
+#### Building an AppImage
+
+To package the app as an AppImage, build the executable first, then place it in `AppDir/usr/bin/` alongside the required launcher, desktop entry and icon.
+
+With `appimagetool` available, run this command from the repository root:
+
+```bash
+ARCH=x86_64 ./aitool/appimagetool AppDir GB-Link-Companion-x86_64.AppImage
+```
+
+The AppImage will be created as `GB-Link-Companion-x86_64.AppImage`.
 
 ## What's in this repository
 
