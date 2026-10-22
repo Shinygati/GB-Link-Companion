@@ -88,7 +88,7 @@ Wonder Cards only work with the original English games, checked against No-Intro
 
 ---
 
-## Building from source
+## Building from source Windows
 
 The app is written in Go with the [Gio](https://gioui.org) UI toolkit. You need Go 1.24 or newer:
 
@@ -106,6 +106,35 @@ make -C b2s/gba
 cp b2s/gba/gblink_sync_mb.gba gblink-companion-native/assets/
 ```
 
+## Building from source Linux
+
+### Linux
+
+Install [Go 1.24 or newer](https://go.dev/dl/), then open a terminal in the repository folder and run:
+
+```bash
+cd gblink-companion-native
+go build -o GBLinkCompanion .
+```
+
+This creates the Linux executable `GBLinkCompanion`. Run it with:
+
+```bash
+./GBLinkCompanion
+```
+
+#### Building an AppImage
+
+To package the app as an AppImage, build the executable first, then place it in `AppDir/usr/bin/` alongside the required launcher, desktop entry and icon.
+
+With `appimagetool` available, run this command from the repository root:
+
+```bash
+ARCH=x86_64 ./aitool/appimagetool AppDir GB-Link-Companion-x86_64.AppImage
+```
+
+The AppImage will be created as `GB-Link-Companion-x86_64.AppImage`.
+
 ## What's in this repository
 
 | Folder | What it is |
@@ -122,6 +151,7 @@ cp b2s/gba/gblink_sync_mb.gba gblink-companion-native/assets/
   - the adapter's protocol and multiboot (ported from their web tools),
   - the save reading approach and ROM streaming ideas from [gb-cart-doctor-web](https://github.com/GB-Link/gb-cart-doctor-web),
   - every Wonder Card in the app, from [gblink-wondercards](https://github.com/GB-Link/gblink-wondercards) (GPL-3.0). These include the classic event distributions, Project Wonder's cards (Goppier) and the cards by Blisy, Youpileouf and others that the GB-Link team collected, plus the GB-Link Team's own cards.
+- **Wired-Ariel** for [gen3-poke-multiplayer](https://github.com/Wired-Ariel/gen3-poke-multiplayer), which provided reference code and inspiration for using GBA multiboot to run code on a real Game Boy Advance. GB-Link Companion uses this approach to inject and execute Wonder Card code while Pokémon Emerald is running on the GBA.
 - **vrodin** for [Burn2Slot](https://github.com/vrodin/Burn2Slot) (MIT). The GBA helper started out as Burn2Slot, including its link handling and cartridge and flash code.
 - **[pret](https://github.com/pret)** for the pokeruby, pokeemerald and pokefirered decompilations. Their symbol files give the addresses the status screens and Wonder Cards use.
 - **[mGBA](https://mgba.io)** by endrift, whose scripting API the app's script runs on.
