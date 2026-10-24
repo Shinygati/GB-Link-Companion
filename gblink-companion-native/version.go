@@ -12,7 +12,7 @@ import (
 )
 
 // appVersion: bump it for each release; the release's tag should be the same ("v1.2.0").
-const appVersion = "1.3.0"
+const appVersion = "1.3.1"
 
 const releasesAPI = "https://api.github.com/repos/Shinygati/GB-Link-Companion/releases/latest"
 const releasesPage = "https://github.com/Shinygati/GB-Link-Companion/releases"

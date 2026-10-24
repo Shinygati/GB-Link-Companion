@@ -8,7 +8,7 @@
 -- finds in the ROM (OVERRIDE). The screens' text is in the game's language (TR).
 -- mGBA 0.11 / development builds load this automatically. On mGBA 0.10, load it each time with
 -- Tools > Scripting... > File > Load script...
-local PORT = __PORT__
+local PORT = 47187
 local sock, buf, added, wait, tries = nil, "", 0, 0, 0
 local mode = 0            -- what the GBA shows: 0 nothing, 1 RNG, 2 wild, 3 trainer, 4 map
 local cursor = nil        -- the map cursor's cell {x, y}, or nil (set by GB-Link Companion)
@@ -16,6 +16,11 @@ local urgent = false      -- send the screen on the next frame (the cursor moved
 local preview = false     -- show the place under the cursor as a picture (set by GB-Link Companion)
 local quiet = 0           -- frames since the app last sent the GBA's buttons
 local fixSeed = true      -- give Pokemon Emerald (the original game) a random starting seed (app setting)
+local controllerOn = true  -- "Use the GBA as a controller" (app setting); off = this script does nothing
+if not controllerOn then
+  console:log("GB-Link Companion: \"Use the GBA as a controller\" is off in the app's settings, so this script does nothing.")
+  return
+end
 
 ------------------------------------------------------------------------------- the game
 -- Addresses from the pret decompilations' symbol files (pokeruby, pokeemerald, pokefirered).

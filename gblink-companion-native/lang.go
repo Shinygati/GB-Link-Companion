@@ -111,6 +111,9 @@ const msgLang = 5
 // SetLanguage: the helper's text in this language (and its screen redrawn). Old helpers ignore it.
 func (h *Helper) SetLanguage(lang byte) error {
 	_, _, err := h.Command(cmdShow, []uint32{msgLang, uint32(lang)}, nil, 3*time.Second, []int{0}, time.Second)
+	if err == nil {
+		h.shot.setJapanese(lang == 'J') // the GBA draws kana in the Japanese games' language
+	}
 	return err
 }
 

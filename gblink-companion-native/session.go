@@ -423,10 +423,17 @@ func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 			if override == "" {
 				override = foundOverride(s.game.ROM, s.game.Code, log)
 			}
-			lua = writeLua(b.port, override, luaTranslations(b.lang))
+			b.luaOverride, b.luaTrans = override, luaTranslations(b.lang)
+			lua = writeLua(b.port, b.luaOverride, b.luaTrans, set.KeepEmeraldSeed, true)
+			b.luaPath, b.luaCfg = lua, luaCfg{keepSeed: set.KeepEmeraldSeed, controller: true}
 		}
 	}
 	if lua == "" {
+		if !set.Controller {
+			// not loaded now, but keep the file on disk in step with the settings: if it's loaded
+			// by hand in mGBA it then does nothing, as the setting says
+			writeLua(controllerPort, "", "", set.KeepEmeraldSeed, false)
+		}
 		s.ui.SetController(func(c *ControllerView) { c.Enabled = false })
 		return start()
 	}
@@ -515,16 +522,26 @@ func (s *Session) watch(p *mgbaProc) {
 //go:embed assets/gblink_controller.lua
 var luaSource string
 
-// writeLua writes the mGBA script next to this app (easy to find when loading it by hand), or
-// in the settings folder, and returns its path.
-func writeLua(port int, override, translations string) string {
+// luaText is the script with the port, the settings and the game's addresses and text filled in.
+func luaText(port int, override, translations string, keepSeed, controller bool) string {
 	text := strings.ReplaceAll(luaSource, "__PORT__", strconv.Itoa(port))
+	text = strings.Replace(text, "local fixSeed = true", "local fixSeed = "+strconv.FormatBool(!keepSeed), 1)
+	text = strings.Replace(text, "local controllerOn = true", "local controllerOn = "+strconv.FormatBool(controller), 1)
 	if override != "" {
 		text = strings.Replace(text, "--@OVERRIDE@", "local OVERRIDE = "+override, 1)
 	}
 	if translations != "" {
 		text = strings.Replace(text, "--@LANG@", translations, 1)
 	}
+	return text
+}
+
+// writeLua writes the mGBA script next to this app (easy to find when loading it by hand), or
+// in the settings folder, and returns its path. The app's settings that change the script (keepSeed:
+// "Fix Emerald's starting seed" is off; controller: "Use the GBA as a controller" is on) are
+// written into the file, not just sent to mGBA.
+func writeLua(port int, override, translations string, keepSeed, controller bool) string {
+	text := luaText(port, override, translations, keepSeed, controller)
 	var dirs []string
 	if exe, err := os.Executable(); err == nil {
 		dirs = append(dirs, filepath.Dir(exe))
@@ -542,6 +559,9 @@ func writeLua(port int, override, translations string) string {
 	return ""
 }
 
+// luaCfg: the app's settings that are written into the script file (luaText)
+type luaCfg struct{ keepSeed, controller bool }
+
 type Bridge struct {
 	s        *Session
 	ln       net.Listener
@@ -554,6 +574,10 @@ type Bridge struct {
 	lastOpt  string // the options last sent to the script (sendOptions)
 	quit     chan struct{}
 	wg       sync.WaitGroup
+
+	// what the script on disk was written with (writeLua), to write it again when a setting changes
+	luaPath, luaOverride, luaTrans string
+	luaCfg                         luaCfg // the settings the file on disk was last written with
 
 	// status screens (status.go)
 	st          statusState
@@ -633,6 +657,30 @@ func (b *Bridge) sendOptions() {
 	b.lastOpt = opt
 	b.writeLocked([]byte(opt))
 	b.mu.Unlock()
+}
+
+// rewriteLua writes the current settings into the script file on disk, so the next time it's
+// loaded (by hand, or by mGBA 0.11's --script) it already has them. Called often: it does nothing
+// unless a setting changed since the file was written.
+func (b *Bridge) rewriteLua() {
+	if b.luaPath == "" {
+		return
+	}
+	set := b.s.app.settings()
+	cfg := luaCfg{keepSeed: set.KeepEmeraldSeed, controller: set.Controller}
+	if cfg == b.luaCfg {
+		return
+	}
+	text := luaText(b.port, b.luaOverride, b.luaTrans, cfg.keepSeed, cfg.controller)
+	if old, err := os.ReadFile(b.luaPath); err == nil && string(old) == text {
+		b.luaCfg = cfg
+		return
+	}
+	if err := os.WriteFile(b.luaPath, []byte(text), 0o644); err != nil {
+		b.s.ui.Log("Couldn't update %s (%v).", filepath.Base(b.luaPath), err)
+		return
+	}
+	b.luaCfg = cfg
 }
 
 func (b *Bridge) resync() { b.mu.Lock(); b.needShow = true; b.mu.Unlock() }
@@ -752,6 +800,7 @@ func (b *Bridge) pollLoop() {
 			if want := map[bool]string{false: "F1\n", true: "F0\n"}[s.app.settings().KeepEmeraldSeed]; want != old {
 				b.sendOptions()
 			}
+			b.rewriteLua()
 		}
 		b.send(fwd, beat)
 		time.Sleep(8 * time.Millisecond) // ~100 polls a second

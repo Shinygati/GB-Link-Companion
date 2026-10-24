@@ -38,6 +38,7 @@ type ControllerView struct {
 	ScriptPath                               string
 	GBAShows                                 string // "" = controller mode, else which status screen
 	Passthru                                 bool   // ...while its buttons control mGBA (hold SELECT)
+	LastShot                                 string // the last screenshot saved ("Save screenshot")
 }
 
 type GameView struct {

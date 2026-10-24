@@ -449,6 +449,7 @@ var errRetry = errors.New("link out of step")
 type Helper struct {
 	link *GBLink
 	gap  int
+	shot gbaScreen // a copy of the GBA's status screen, for "Save screenshot" (gbascreen.go)
 }
 
 func (h *Helper) Configure() {
@@ -595,6 +596,9 @@ func (h *Helper) Command(cmd int, args, data []uint32, timeout time.Duration, co
 				h.link.SetTiming(h.gap, 4)
 			}
 			continue
+		}
+		if cmd != cmdStatus {
+			h.shot.leave() // the GBA shows its own screen again for any command but a status one
 		}
 		st, res, err := h.getResult(counts, timeout)
 		if err == errRetry {

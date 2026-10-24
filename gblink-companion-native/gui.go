@@ -711,6 +711,12 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 	if w.b("show").Clicked(gtx) {
 		showInFolder(w.st.Controller.ScriptPath)
 	}
+	if w.b("shot").Clicked(gtx) {
+		go a.saveScreenshot()
+	}
+	if w.b("shot-show").Clicked(gtx) && w.st.Controller.LastShot != "" {
+		showInFolder(w.st.Controller.LastShot)
+	}
 	if w.b("settings-done").Clicked(gtx) || w.b("scrim").Clicked(gtx) {
 		w.settingsOpen = false
 	}
@@ -1374,6 +1380,9 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 		blocks = append(blocks, w.tiles)
 		blocks = append(blocks, w.wcCard)
 		c := st.Controller
+		if c.Enabled && c.ScriptConnected {
+			blocks = append(blocks, w.shotCard)
+		}
 		if c.Enabled && c.Manual && !c.ScriptConnected {
 			blocks = append(blocks, w.scriptCard)
 		}
@@ -1655,6 +1664,35 @@ func (w *Window) stretch(gtx C, wd layout.Widget) D {
 	return wd(gtx)
 }
 
+// shotCard: "Save screenshot" for the status screen the GBA shows now
+func (w *Window) shotCard(gtx C) D {
+	c := w.st.Controller
+	text := "Save a picture of the status screen the GBA shows now (RNG state, wild Pokémon, trainer's team, map)."
+	return layout.Inset{Top: 18}.Layout(gtx, func(gtx C) D {
+		return w.card(gtx, func(gtx C) D {
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx C) D {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx C) D { return w.label(gtx, 16, font.SemiBold, w.pal.text, "Screenshot") }),
+						layout.Rigid(gap(4)),
+						layout.Rigid(func(gtx C) D { return w.label(gtx, 13.5, font.Normal, w.pal.muted, text) }))
+				}),
+				layout.Rigid(gap(16)),
+				layout.Rigid(func(gtx C) D {
+					if c.LastShot == "" {
+						return D{}
+					}
+					return layout.Inset{Right: 10}.Layout(gtx, func(gtx C) D {
+						return w.button(gtx, w.b("shot-show"), "ghost", "Show the file", false, nil)
+					})
+				}),
+				layout.Rigid(func(gtx C) D {
+					return w.button(gtx, w.b("shot"), "primary", "Save screenshot", false, nil)
+				}))
+		})
+	})
+}
+
 func (w *Window) scriptCard(gtx C) D {
 	return layout.Inset{Top: 18}.Layout(gtx, func(gtx C) D {
 		return w.box(gtx, w.pal.surface, mix(w.pal.accent, w.pal.border, .35), 14, 22, func(gtx C) D {
@@ -1882,15 +1920,41 @@ func (w *Window) settingsDialog(gtx C) {
 			})
 		})
 	}
+
 	sw := func(b *widget.Bool) layout.Widget {
 		return func(gtx C) D {
-			s := material.Switch(w.th, b, "")
-			s.Color.Enabled = w.pal.accent
-			s.Color.Disabled = w.pal.muted
-			s.Color.Track = w.pal.border
-			return s.Layout(gtx)
+			return b.Layout(gtx, func(gtx C) D {
+				width := gtx.Dp(36)
+				height := gtx.Dp(20)
+				thumbSize := gtx.Dp(16)
+				inset := gtx.Dp(2)
+
+				size := image.Pt(width, height)
+				trackColor := w.pal.border
+				thumbColor := w.pal.muted
+				thumbX := inset
+
+				if b.Value {
+					trackColor = w.pal.accent
+					thumbColor = w.pal.bg
+					thumbX = width - thumbSize - inset
+				}
+
+				fill(gtx, size, height/2, trackColor)
+
+				defer op.Offset(image.Pt(thumbX, inset)).Push(gtx.Ops).Pop()
+				fill(
+					gtx,
+					image.Pt(thumbSize, thumbSize),
+					thumbSize/2,
+					thumbColor,
+				)
+
+				return D{Size: size}
+			})
 		}
 	}
+
 	div := layout.Rigid(func(gtx C) D {
 		fill(gtx, image.Pt(gtx.Constraints.Max.X, gtx.Dp(1)), 0, w.pal.border)
 		return D{Size: image.Pt(gtx.Constraints.Max.X, gtx.Dp(1))}

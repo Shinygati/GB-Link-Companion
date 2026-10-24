@@ -1026,6 +1026,7 @@ func (h *Helper) Status(op int, extra []uint32, data []uint32) error {
 	if st != stOK {
 		return &statusErr{st}
 	}
+	h.shot.apply(args, data) // the GBA drew it: so does the copy
 	return nil
 }
 
