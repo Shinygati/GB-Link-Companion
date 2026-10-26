@@ -3,6 +3,12 @@
 #include "gba.h"
 #include "save.h"
 #include "proto.h"
+#ifndef B2S_SIM
+#include "sio.h"
+#define SVC()         sio_service()   /* keep answering the host (the GBA's buttons) during long waits */
+#else
+#define SVC()         ((void)0)
+#endif
 
 #ifndef B2S_SIM
 #define SAVE8         ((vu8 *)0x0E000000)
@@ -98,7 +104,7 @@ static void flash_bank(u32 offset, u32 type)
 
 static int flash_wait(u32 a, u8 want)
 {
-    for (u32 t = 0; t < 0x200000; t++) if (save_rd(a) == want) return 0;
+    for (u32 t = 0; t < 0x200000; t++) { if (save_rd(a) == want) return 0; SVC(); }
     return -1;
 }
 
@@ -129,7 +135,7 @@ static int eeprom_write8(u32 block, u32 abits, const u8 *in)
         for (int i = 7; i >= 0; i--) bits[n++] = (in[byte] >> i) & 1;
     bits[n++] = 0;
     eeprom_send(bits, n);
-    for (u32 t = 0; t < 0x100000; t++) if (eeprom_status()) return 0;   /* ~10 ms typical */
+    for (u32 t = 0; t < 0x100000; t++) { if (eeprom_status()) return 0; SVC(); }   /* ~10 ms typical */
     return -1;
 }
 
@@ -249,10 +255,13 @@ int save_write(u32 type, u32 offset, u32 nbytes, const u8 *in, u8 *got)
                     fcmd(0xA0);
                     save_wr(base + k, src[k]);
                     if (flash_wait(base + k, src[k])) { *got = save_rd(base + k); return (int)(s + k); }
+                    SVC();
                 }
             }
-            for (u32 k = 0; k < 0x1000; k++)
+            for (u32 k = 0; k < 0x1000; k++) {
                 if (save_rd(base + k) != src[k]) { *got = save_rd(base + k); return (int)(s + k); }
+                if (!(k & 1)) SVC();
+            }
         }
         return -1;
     }

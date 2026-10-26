@@ -78,3 +78,19 @@ IWRAM_CODE int sio_recv(u32 *dst, u32 n, u32 ack, int arm_last, u32 *ck, u32 tim
     *ck = c;
     return 1;
 }
+
+/* ---- answering the host while a long job runs (see sio.h) ---- */
+static volatile u32 service_on;
+
+IWRAM_CODE void sio_service_on(int on)
+{
+    service_on = (u32)on;
+    if (on) sio_resync_arm(W_IDLE);       /* from now on POLLs are answered with IDLE, not stale data */
+}
+
+IWRAM_CODE void sio_service(void)
+{
+    if (!service_on || (REG_SIOCNT & SIO_START)) return;   /* off, or no word has arrived yet */
+    u32 w = REG_SIODATA32;
+    sio_arm(w == W_KEYS ? W_KEYS_REPLY(~REG_KEYINPUT) : W_IDLE);
+}

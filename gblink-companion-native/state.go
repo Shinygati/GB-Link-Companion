@@ -60,7 +60,7 @@ type Verify struct {
 
 type State struct {
 	Phase      string  // home | connect | load | play | finish | done   (backup: connect | load | dump | done)
-	Mode       string  // play | backup
+	Mode       string  // play | backup | restore | gbawc
 	BackupPath string  // the file a backup was saved to
 	Verify     *Verify // the No-Intro check of a backup
 	DATInfo    string  // which No-Intro database is in use
@@ -259,7 +259,12 @@ func (a *App) closeWhileBusy() {
 	if s == nil {
 		os.Exit(0)
 	}
-	if ph := a.ui.Snapshot().Phase; ph != "play" && ph != "finish" {
+	ph := a.ui.Snapshot().Phase
+	if ph == "play" {
+		// closing the window closes mGBA too; its save is then copied to the cartridge in the
+		// background (the window comes back if the GBA has to be switched on)
+		s.closeMGBA()
+	} else if ph != "finish" {
 		s.stopped.Store(true)
 		if s.cancel != nil {
 			select {
@@ -279,6 +284,7 @@ type App struct {
 	set     Settings
 	session *Session
 	win     *Window // the open window, nil if closed
+	pop     *livePop // the GBA screen's own window, nil if not open (livescreen.go)
 	winMu   sync.Mutex
 }
 

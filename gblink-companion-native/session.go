@@ -40,6 +40,7 @@ type Session struct {
 	helperLg   byte          // the language the helper's text is in now (0: not known)
 	clockUsed  bool          // the .sav ends with the cartridge's clock for mGBA (cartclock.go)
 	lastBackup string        // hash of the last save backed up from mGBA
+	proc       atomic.Pointer[mgbaProc] // the mGBA that's running (closed when the app is: closeMGBA)
 }
 
 // helperLang: the language for the GBA's text: the Pokémon game's (lang.go), else English
@@ -387,6 +388,33 @@ type mgbaProc struct {
 	done chan struct{}
 }
 
+// close asks mGBA to quit the way its window's close button does, and ends it if it's still there
+// 8 seconds later. The session then carries on as when you close mGBA yourself: the save goes to
+// the cartridge.
+func (p *mgbaProc) close() {
+	select {
+	case <-p.done:
+		return
+	default:
+	}
+	askClose(p.cmd)
+	go func() {
+		select {
+		case <-p.done:
+		case <-time.After(8 * time.Second):
+			p.cmd.Process.Kill()
+		}
+	}()
+}
+
+// closeMGBA: the app is being closed, so mGBA closes too.
+func (s *Session) closeMGBA() {
+	if p := s.proc.Load(); p != nil {
+		s.ui.Log("The app was closed, so mGBA is closing.")
+		p.close()
+	}
+}
+
 func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 	var lua string
 	start := func(args ...string) (*mgbaProc, error) {
@@ -407,7 +435,9 @@ func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
+		tieToApp(cmd) // if the app is killed, mGBA goes with it (Windows)
 		p := &mgbaProc{cmd: cmd, done: make(chan struct{})}
+		s.proc.Store(p)
 		go func() { cmd.Wait(); close(p.done) }()
 		return p, nil
 	}
@@ -572,8 +602,12 @@ type Bridge struct {
 	online   bool
 	needShow bool
 	lastOpt  string // the options last sent to the script (sendOptions)
-	quit     chan struct{}
-	wg       sync.WaitGroup
+
+	// (pollLoop's goroutine, or whoever holds linkMu)
+	restartTry    int  // tryRestart calls since the GBA went quiet
+	adapterWarned bool // the log already says the adapter is unplugged
+	quit          chan struct{}
+	wg            sync.WaitGroup
 
 	// what the script on disk was written with (writeLua), to write it again when a setting changes
 	luaPath, luaOverride, luaTrans string
@@ -776,7 +810,11 @@ func (b *Bridge) pollLoop() {
 				b.send(0, false)
 				s.ui.SetGBA("off")
 				s.ui.SetController(func(c *ControllerView) { c.Online = false })
-				s.ui.Log("The GBA stopped answering (switched off?). Use the keyboard or a pad in mGBA.")
+				if s.link.Broken() {
+					s.ui.Log("The GB-Link adapter stopped answering (unplugged?). Use the keyboard or a pad in mGBA; it'll reconnect when it's plugged in.")
+				} else {
+					s.ui.Log("The GBA stopped answering (switched off?). Use the keyboard or a pad in mGBA.")
+				}
 			}
 			if b.online {
 				time.Sleep(10 * time.Millisecond)
@@ -812,6 +850,19 @@ func (b *Bridge) pollLoop() {
 // Called with linkMu held.
 func (b *Bridge) tryRestart() {
 	s := b.s
+	b.restartTry++
+	// The adapter was unplugged (or came back as another port): the old connection never works
+	// again, so open a new one. If the helper is still running on the GBA, carry on with it.
+	if s.link.Broken() || (b.restartTry%6 == 0 && adapterMoved(s.link)) {
+		ok, helperUp := b.reconnectAdapter()
+		if !ok {
+			return
+		}
+		if helperUp {
+			b.helperBack()
+			return
+		}
+	}
 	lang := s.helperLang()
 	if err := s.link.Multiboot(helperImageFor(lang), 50*time.Millisecond, nil); err != nil {
 		s.helper.Configure() // back to the helper's link timing
@@ -827,10 +878,69 @@ func (b *Bridge) tryRestart() {
 	s.cart = nil
 	b.resync()
 	s.ui.SetGBA("on")
+	b.catchUpSave()
+}
+
+// catchUpSave writes a save made while the GBA wasn't there to the cart. Called with linkMu held.
+func (b *Bridge) catchUpSave() {
+	s := b.s
 	if s.needsPush() {
 		if _, err := s.push(""); err != nil {
 			s.ui.Log("Couldn't write the save to the cartridge just now (%v).", err)
 			s.markPending()
 		}
 	}
+}
+
+// helperBack: after the adapter was plugged in again the helper was still running on the GBA:
+// show its screen again and catch the cart up. Called with linkMu held.
+func (b *Bridge) helperBack() {
+	s := b.s
+	s.helperLg = 0
+	s.matchHelperLang()
+	b.resync() // the status screen is drawn again
+	s.ui.SetGBA("on")
+	b.catchUpSave()
+}
+
+// adapterMoved: the GB-Link adapter isn't on the port this connection uses any more.
+func adapterMoved(l *GBLink) bool {
+	if os.Getenv("GBLINK_PORT") != "" { // tests
+		return false
+	}
+	p := FindGBLinkPort()
+	return p == "" || p != l.name
+}
+
+// reconnectAdapter opens the GB-Link adapter again after it was unplugged. ok: there's a working
+// connection now (false: not plugged in yet, tried again next time); helperUp: and the helper is
+// still running on the GBA. The Helper stays the same object, only its connection is replaced.
+// Called with linkMu held.
+func (b *Bridge) reconnectAdapter() (ok, helperUp bool) {
+	s := b.s
+	port := os.Getenv("GBLINK_PORT")
+	if port == "" {
+		port = FindGBLinkPort()
+	}
+	if port == "" {
+		if !b.adapterWarned {
+			b.adapterWarned = true
+			s.ui.Log("The GB-Link adapter was unplugged. Plug it in again: the GBA will connect by itself.")
+		}
+		return false, false
+	}
+	l, err := OpenGBLink(port)
+	if err != nil {
+		return false, false // maybe still being set up by the OS: try again shortly
+	}
+	l.SetVoltage3V3()
+	old := s.link
+	s.link, s.helper.link = l, l
+	if old != nil {
+		go old.Close() // in the background: it can hang if the adapter was just unplugged
+	}
+	b.adapterWarned = false
+	s.ui.Log("GB-Link connected again on %s.", port)
+	s.helper.Configure() // a freshly plugged-in adapter starts in its default mode
+	return true, s.helper.Alive(1500 * time.Millisecond)
 }

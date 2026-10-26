@@ -449,7 +449,14 @@ var errRetry = errors.New("link out of step")
 type Helper struct {
 	link *GBLink
 	gap  int
-	shot gbaScreen // a copy of the GBA's status screen, for "Save screenshot" (gbascreen.go)
+	// between, if set, is called between the blocks of a save write: the GBA answers then, so the
+	// caller can pass its buttons on to mGBA (linkMu is held by the caller; don't take it again)
+	between func()
+	// during, if set, is called while waiting for a command's result, until the result starts to
+	// arrive (a save write: the GBA answers button polls meanwhile, see sio_service in the helper).
+	// Called with linkMu held; it may use h.Keys().
+	during func()
+	shot   gbaScreen // a copy of the GBA's status screen, for "Save screenshot" (gbascreen.go)
 }
 
 func (h *Helper) Configure() {
@@ -505,7 +512,11 @@ func (h *Helper) getResult(counts []int, timeout time.Duration) (int, []uint32, 
 	end := time.Now().Add(timeout)
 	var pending []uint32
 	need := 15
+	resultSeen := false
 	for time.Now().Before(end) {
+		if h.during != nil && !resultSeen {
+			h.during()
+		}
 		polls := make([]uint32, need)
 		for i := range polls {
 			polls[i] = wPoll
@@ -515,6 +526,11 @@ func (h *Helper) getResult(counts []int, timeout time.Duration) (int, []uint32, 
 			return 0, nil, err
 		}
 		pending = append(pending, r...)
+		for _, w := range r {
+			if w>>24 == 0x52 {
+				resultSeen = true
+			}
+		}
 		need = 15
 		waiting := false
 		for i := 0; i < len(pending); i++ {
@@ -754,6 +770,9 @@ func (h *Helper) WriteSave(stype int, data, old []byte, progress func(done, tota
 			return k, linkErr("Writing the save failed: %s", stNames[st])
 		}
 		progress(k+1, len(chunks))
+		if h.between != nil && k+1 < len(chunks) {
+			h.between()
+		}
 	}
 	return len(chunks), nil
 }

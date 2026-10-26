@@ -12,4 +12,9 @@ int  sio_wait(u32 *word, u32 timeout_ms);
 /* receive n words into dst, loading ACK(ack) ACK(ack+1)... after each one (not after the last
  * one unless arm_last); updates the checksum. Returns 0 on timeout. */
 int  sio_recv(u32 *dst, u32 n, u32 ack, int arm_last, u32 *ck, u32 timeout_ms);
+/* While the GBA works on something long (a save write), keep answering the host as the idle loop
+ * does: POLL -> IDLE, KEYS -> the buttons held. sio_service() is called from the work's wait
+ * loops; it does nothing unless sio_service_on(1) was called (and sio_service_on(1) arms the link). */
+void sio_service_on(int on);
+void sio_service(void);
 #endif

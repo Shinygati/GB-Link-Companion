@@ -152,6 +152,7 @@ var (
 	icCollapse = mustIcon(icons.NavigationExpandLess)
 	icFolder   = mustIcon(icons.FileFolderOpen)
 	icDownload = mustIcon(icons.FileFileDownload)
+	icUpload   = mustIcon(icons.FileFileUpload)
 	icCopy     = mustIcon(icons.ContentContentCopy)
 )
 
@@ -179,6 +180,8 @@ type Window struct {
 	setCtl, setAsk      widget.Bool
 	setSeed             widget.Bool
 	setClock            widget.Bool
+	liveOn              bool     // the GBA's screen is shown in the window (the "Show GBA screen" button)
+	live                liveView // its picture (livescreen.go)
 	settingsOpen        bool
 	wcOpen              bool   // the Wonder Cards list (wcgui.go)
 	wcSel               string // the card whose description is open
@@ -271,6 +274,7 @@ func (w *Window) loop() {
 			a.winMu.Lock()
 			a.win = nil
 			a.winMu.Unlock()
+			a.closeLivePop()
 			if !a.busy() {
 				os.Exit(0)
 			}
@@ -643,7 +647,7 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 	if w.b("play").Clicked(gtx) && w.selected != "" {
 		w.startPlay(w.selected)
 	}
-	if w.b("again").Clicked(gtx) && w.st.Game != nil && w.st.Mode != "backup" {
+	if w.b("again").Clicked(gtx) && w.st.Game != nil && w.st.Mode != "backup" && w.st.Mode != "restore" {
 		w.startPlay(w.st.Game.ROM)
 	}
 	if w.b("home").Clicked(gtx) {
@@ -652,6 +656,13 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 	if w.b("backup").Clicked(gtx) || w.b("backup-2").Clicked(gtx) || w.b("backup-again").Clicked(gtx) {
 		go func() {
 			if err := a.backup(); err != nil {
+				a.ui.Toast(err.Error())
+			}
+		}()
+	}
+	if w.b("restore").Clicked(gtx) || w.b("restore-again").Clicked(gtx) {
+		go func() {
+			if err := a.restoreSave(); err != nil {
 				a.ui.Toast(err.Error())
 			}
 		}()
@@ -735,6 +746,16 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 	if w.setClock.Update(gtx) {
 		v := w.setClock.Value
 		go a.setSettings(func(s *Settings) { s.PCClock = !v })
+	}
+	if w.b("live-show").Clicked(gtx) {
+		w.liveOn = true
+	}
+	if w.b("live-hide").Clicked(gtx) {
+		w.liveOn = false
+	}
+	if w.b("live-pop").Clicked(gtx) { // out of the window and into one of its own
+		w.liveOn = false
+		go a.openLivePop()
 	}
 	if !w.setClock.Pressed() {
 		w.setClock.Value = !w.st.Settings.PCClock
@@ -1149,6 +1170,10 @@ func (w *Window) homeHead(gtx C) D {
 				}),
 				layout.Rigid(gap(4)),
 				layout.Rigid(func(gtx C) D {
+					return w.button(gtx, w.b("restore"), "ghost", "Restore a save", false, icUpload)
+				}),
+				layout.Rigid(gap(4)),
+				layout.Rigid(func(gtx C) D {
 					return w.button(gtx, w.b("backup"), "ghost", "Back up a cartridge", false, icDownload)
 				}))
 		}),
@@ -1315,10 +1340,13 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 	if phase == "connect" {
 		phase = "load"
 	}
-	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup" || st.Result == "gbawc")
+	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup" || st.Result == "restore" || st.Result == "gbawc")
 	eyebrow := map[string]string{"load": "Getting ready", "play": "Now playing", "finish": "Saving to the cartridge"}[phase]
 	if st.Mode == "backup" {
 		eyebrow = map[string]string{"load": "Backing up a cartridge", "dump": "Backing up"}[phase]
+	}
+	if st.Mode == "restore" {
+		eyebrow = map[string]string{"load": "Restoring a save", "dump": "Restoring a save"}[phase]
 	}
 	if st.Mode == "gbawc" {
 		eyebrow = "Wonder Cards on your GBA"
@@ -1381,6 +1409,9 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 		blocks = append(blocks, w.wcCard)
 		c := st.Controller
 		if c.Enabled && c.ScriptConnected {
+			if w.liveOn {
+				blocks = append(blocks, w.liveCard)
+			}
 			blocks = append(blocks, w.shotCard)
 		}
 		if c.Enabled && c.Manual && !c.ScriptConnected {
@@ -1416,6 +1447,10 @@ func (w *Window) stepper(gtx C, mode, phase string, doneAll bool) D {
 	cur := map[string]int{"load": 0, "play": 1, "finish": 2}[phase]
 	if mode == "backup" {
 		steps = []string{"Read the cartridge", "Copy the game", "Saved on this PC"}
+		cur = map[string]int{"load": 0, "dump": 1}[phase]
+	}
+	if mode == "restore" {
+		steps = []string{"Check the cartridge", "Write the save", "Checked and done"}
 		cur = map[string]int{"load": 0, "dump": 1}[phase]
 	}
 	if mode == "gbawc" {
@@ -1667,7 +1702,7 @@ func (w *Window) stretch(gtx C, wd layout.Widget) D {
 // shotCard: "Save screenshot" for the status screen the GBA shows now
 func (w *Window) shotCard(gtx C) D {
 	c := w.st.Controller
-	text := "Save a picture of the status screen the GBA shows now (RNG state, wild Pokémon, trainer's team, map)."
+	text := "Save a picture of the status screen the GBA shows now (RNG state, wild Pokémon, trainer's team, map), or watch it here as it changes."
 	return layout.Inset{Top: 18}.Layout(gtx, func(gtx C) D {
 		return w.card(gtx, func(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -1684,6 +1719,14 @@ func (w *Window) shotCard(gtx C) D {
 					}
 					return layout.Inset{Right: 10}.Layout(gtx, func(gtx C) D {
 						return w.button(gtx, w.b("shot-show"), "ghost", "Show the file", false, nil)
+					})
+				}),
+				layout.Rigid(func(gtx C) D {
+					if w.liveOn {
+						return D{}
+					}
+					return layout.Inset{Right: 10}.Layout(gtx, func(gtx C) D {
+						return w.button(gtx, w.b("live-show"), "secondary", "Show GBA screen", false, nil)
 					})
 				}),
 				layout.Rigid(func(gtx C) D {
@@ -1746,10 +1789,14 @@ func (w *Window) doneCard(gtx C) D {
 		ibg, ifg, ic, title = w.pal.warnSoft, w.pal.warn, icWarn, "Your save is on this PC"
 	case "backup":
 		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Backed up!"
+	case "restore":
+		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Save written!"
 	case "failed":
 		ibg, ifg, ic, title = w.pal.warnSoft, w.pal.warn, icWarn, "The backup didn't finish"
 		if st.Mode == "gbawc" {
 			title = "Wonder Cards stopped"
+		} else if st.Mode == "restore" {
+			title = "The save wasn't written"
 		}
 	case "gbawc":
 		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Done"
@@ -1761,6 +1808,8 @@ func (w *Window) doneCard(gtx C) D {
 		buttons = []btn{{"play-backup", "primary", "Play it now"}, {"show-backup", "secondary", "Show the file"}, {"home", "secondary", "Back to games"}}
 	case st.Mode == "backup":
 		buttons = []btn{{"backup-again", "primary", "Try again"}, {"home", "secondary", "Back to games"}}
+	case st.Mode == "restore":
+		buttons = []btn{{"restore-again", "primary", "Write another save"}, {"home", "secondary", "Back to games"}}
 	case st.Mode == "gbawc":
 		buttons = []btn{{"gbawc-again", "primary", "Start again"}, {"home", "secondary", "Back to games"}}
 	}

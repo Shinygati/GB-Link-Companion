@@ -9,9 +9,66 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
+
+var (
+	pPostMessage              = user32.NewProc("PostMessageW")
+	pEnumWindows              = user32.NewProc("EnumWindows")
+	pGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
+	closePID                  uint32 // the process whose windows askClose is closing
+	closeCb                   = syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
+		var pid uint32
+		pGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+		if pid != 0 && pid == atomic.LoadUint32(&closePID) {
+			pPostMessage.Call(hwnd, 0x0010, 0, 0) // WM_CLOSE: the same as its close button
+		}
+		return 1
+	})
+	jobOnce   sync.Once
+	jobHandle windows.Handle
+)
+
+// askClose closes mGBA's windows the way the close button does, so it quits cleanly.
+func askClose(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+	atomic.StoreUint32(&closePID, uint32(cmd.Process.Pid))
+	pEnumWindows.Call(closeCb, 0)
+}
+
+// tieToApp puts mGBA in a job that ends when this app does, even if the app is killed or crashes.
+func tieToApp(cmd *exec.Cmd) {
+	jobOnce.Do(func() {
+		h, err := windows.CreateJobObject(nil, nil)
+		if err != nil {
+			return
+		}
+		var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+		info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+		if _, err := windows.SetInformationJobObject(h, windows.JobObjectExtendedLimitInformation,
+			uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+			windows.CloseHandle(h)
+			return
+		}
+		jobHandle = h
+	})
+	if jobHandle == 0 || cmd.Process == nil {
+		return
+	}
+	ph, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(ph)
+	windows.AssignProcessToJobObject(jobHandle, ph)
+}
 
 var (
 	comdlg32           = syscall.NewLazyDLL("comdlg32.dll")

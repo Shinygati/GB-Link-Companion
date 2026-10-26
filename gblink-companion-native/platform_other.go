@@ -9,7 +9,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
+
+// tieToApp: on Windows, mGBA is ended with the app even if the app is killed. Not done here.
+func tieToApp(cmd *exec.Cmd) {}
+
+// askClose asks mGBA to quit (it doesn't ask to be saved first: SIGTERM ends it at once).
+func askClose(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		cmd.Process.Signal(syscall.SIGTERM)
+	}
+}
 
 // On Linux the file pickers are zenity (GNOME and most desktops) or kdialog (KDE), whichever is
 // installed; without either, the window offers recent games and the games folder.

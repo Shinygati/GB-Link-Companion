@@ -61,9 +61,17 @@ type gbaScreen struct {
 	mk                       [2]scMark // 0: you, 1: the cursor
 	spr                      [stSprites]scSprite
 	bkX0, bkY0, bkX1, bkY1   int // where the background is on the screen now (bkX1 = 0: nowhere)
+	rev                      uint64 // counts changes to the picture, so the window knows when to redraw it
 }
 
-func (g *gbaScreen) setJapanese(jp bool) { g.mu.Lock(); g.jp = jp; g.mu.Unlock() }
+func (g *gbaScreen) setJapanese(jp bool) { g.mu.Lock(); g.jp = jp; g.rev++; g.mu.Unlock() }
+
+// revision: changes whenever the picture may have changed (the window's live view polls this).
+func (g *gbaScreen) revision() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.rev
+}
 
 func word16(d []uint32, i int) uint16 { return uint16(d[i/2] >> (16 * (i & 1))) }
 func word8(d []uint32, i int) byte    { return byte(d[i/4] >> (8 * (i & 3))) }
@@ -73,6 +81,7 @@ func word8(d []uint32, i int) byte    { return byte(d[i/4] >> (8 * (i & 3))) }
 func (g *gbaScreen) apply(args []uint32, data []uint32) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	defer func() { g.rev++ }() // runs before the unlock above
 	if len(args) < 2 {
 		return
 	}
@@ -248,6 +257,7 @@ func (g *gbaScreen) leave() { g.mu.Lock(); g.leaveLocked(); g.mu.Unlock() }
 func (g *gbaScreen) leaveLocked() {
 	if g.active { // status_leave: blank, then the GBA draws its own screen
 		g.active = false
+		g.rev++
 		for i := range g.vram {
 			g.vram[i] = scBG
 		}

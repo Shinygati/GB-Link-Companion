@@ -15,7 +15,7 @@ local cursor = nil        -- the map cursor's cell {x, y}, or nil (set by GB-Lin
 local urgent = false      -- send the screen on the next frame (the cursor moved)
 local preview = false     -- show the place under the cursor as a picture (set by GB-Link Companion)
 local quiet = 0           -- frames since the app last sent the GBA's buttons
-local fixSeed = true      -- give Pokemon Emerald (the original game) a random starting seed (app setting)
+local fixSeed = false      -- give Pokemon Emerald (the original game) a random starting seed (app setting)
 local controllerOn = true  -- "Use the GBA as a controller" (app setting); off = this script does nothing
 if not controllerOn then
   console:log("GB-Link Companion: \"Use the GBA as a controller\" is off in the app's settings, so this script does nothing.")

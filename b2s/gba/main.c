@@ -313,7 +313,13 @@ static u32 run_command(u32 cmd, u32 nargs, u32 ndata, u32 *nres)
         if (nargs < 3 || !save_size(args[0])) return ST_NO_SAVE;
         save_progress(CMD_SAVE_WRITE, L_WRITE, T_WRITING, nargs, 0);
         u8 got = 0;
+#ifndef B2S_SIM
+        sio_service_on(1);      /* the write takes a while: keep answering the host's KEYS polls meanwhile */
+#endif
         int bad = save_write(args[0], args[1], args[2], (const u8 *)block, &got);
+#ifndef B2S_SIM
+        sio_service_on(0);
+#endif
         if (bad == -2) return ST_TOO_BIG;
         if (bad >= 0) { res[0] = (u32)bad; res[1] = got; res[2] = ((const u8 *)block)[bad - (int)args[1]]; *nres = 3; return ST_VERIFY_FAIL; }
         save_progress(CMD_SAVE_WRITE, L_WRITE, T_WRITING, nargs, 1);
