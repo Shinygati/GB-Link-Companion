@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -180,11 +181,20 @@ type Window struct {
 	setCtl, setAsk      widget.Bool
 	setSeed             widget.Bool
 	setClock            widget.Bool
+	setWC               widget.Bool // Wonder Cards on the play screen (Pokémon Enhancements)
+	setPage             string      // the settings page shown: "" (Settings) or "pokemon"
+	setDiscord          widget.Bool // Discord shiny alerts (discord.go)
+	setDcShots          widget.Bool
+	dcToken, dcChannel  widget.Editor
+	dcHook, dcMsg       widget.Editor
+	dcDelay             widget.Editor
+	dcLoaded            bool     // the boxes hold the saved settings (the settings window is open)
 	liveOn              bool     // the GBA's screen is shown in the window (the "Show GBA screen" button)
 	live                liveView // its picture (livescreen.go)
 	settingsOpen        bool
 	wcOpen              bool   // the Wonder Cards list (wcgui.go)
 	wcSel               string // the card whose description is open
+	wcHackOK            bool   // the ROM hack warning was read (wcgui.go)
 	wcList              widget.List
 	setList             widget.List // Settings, when it doesn't fit
 	detailsOpen         bool
@@ -239,6 +249,8 @@ func (a *App) openWindow() {
 	win.wcList.Axis = layout.Vertical
 	win.setList.Axis = layout.Vertical
 	win.search.SingleLine = true
+	win.dcToken.SingleLine, win.dcToken.Mask = true, '•'
+	win.dcChannel.SingleLine, win.dcHook.SingleLine, win.dcDelay.SingleLine = true, true, true
 	if img, err := png.Decode(bytes.NewReader(iconPNG)); err == nil {
 		win.logo = paint.NewImageOp(img)
 	}
@@ -668,6 +680,7 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 		}()
 	}
 	if w.b("gbawc").Clicked(gtx) || w.b("gbawc-again").Clicked(gtx) {
+		w.settingsOpen, w.setPage = false, ""
 		go func() {
 			if err := a.gbaWonderCards(); err != nil {
 				a.ui.Toast(err.Error())
@@ -729,7 +742,30 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 		showInFolder(w.st.Controller.LastShot)
 	}
 	if w.b("settings-done").Clicked(gtx) || w.b("scrim").Clicked(gtx) {
-		w.settingsOpen = false
+		w.settingsOpen, w.setPage = false, ""
+	}
+	if w.b("set-pokemon").Clicked(gtx) {
+		w.setPage = "pokemon"
+		w.setList.Position = layout.Position{}
+	}
+	if w.b("set-back").Clicked(gtx) {
+		w.setPage = ""
+		w.setList.Position = layout.Position{}
+	}
+	if w.b("wc-import").Clicked(gtx) || w.b("wc-import-2").Clicked(gtx) {
+		go a.addCustomWonderCards()
+	}
+	if w.b("wc-folder").Clicked(gtx) {
+		showInFolder(customWCDir())
+	}
+	for _, c := range customWonderCards() {
+		if w.b("wc-rm:" + c.File).Clicked(gtx) {
+			go a.removeCustomWonderCard(c.File)
+		}
+	}
+	if w.setWC.Update(gtx) {
+		v := w.setWC.Value
+		go a.setSettings(func(s *Settings) { s.WonderCardsOff = !v })
 	}
 	if w.setCtl.Update(gtx) {
 		v := w.setCtl.Value
@@ -747,6 +783,27 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 		v := w.setClock.Value
 		go a.setSettings(func(s *Settings) { s.PCClock = !v })
 	}
+	if w.setDiscord.Update(gtx) {
+		v := w.setDiscord.Value
+		go a.setSettings(func(s *Settings) { s.DiscordOn = v })
+	}
+	if w.setDcShots.Update(gtx) {
+		v := w.setDcShots.Value
+		go a.setSettings(func(s *Settings) { s.DiscordShots = v })
+	}
+	if w.b("discord-test").Clicked(gtx) {
+		set := w.st.Settings
+		w.discordFields()(&set)
+		go a.setSettings(w.discordFields())
+		go a.discordTest(set)
+	}
+	if w.settingsOpen && !w.dcLoaded { // the boxes are filled in when the settings open...
+		w.loadDiscordFields(w.st.Settings)
+		w.dcLoaded = true
+	} else if !w.settingsOpen && w.dcLoaded { // ...and saved when they close
+		w.dcLoaded = false
+		go a.setSettings(w.discordFields())
+	}
 	if w.b("live-show").Clicked(gtx) {
 		w.liveOn = true
 	}
@@ -760,8 +817,17 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 	if !w.setClock.Pressed() {
 		w.setClock.Value = !w.st.Settings.PCClock
 	}
+	if !w.setWC.Pressed() {
+		w.setWC.Value = !w.st.Settings.WonderCardsOff
+	}
 	if !w.setSeed.Pressed() {
 		w.setSeed.Value = !w.st.Settings.KeepEmeraldSeed
+	}
+	if !w.setDiscord.Pressed() {
+		w.setDiscord.Value = w.st.Settings.DiscordOn
+	}
+	if !w.setDcShots.Pressed() {
+		w.setDcShots.Value = w.st.Settings.DiscordShots
 	}
 	if !w.setCtl.Pressed() {
 		w.setCtl.Value = w.st.Settings.Controller
@@ -1166,10 +1232,6 @@ func (w *Window) homeHead(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx C) D { return w.label(gtx, 24, font.SemiBold, w.pal.text, "Choose a game") }),
 				layout.Rigid(func(gtx C) D {
-					return w.button(gtx, w.b("gbawc"), "ghost", "Wonder Cards on your GBA", false, icGamepad)
-				}),
-				layout.Rigid(gap(4)),
-				layout.Rigid(func(gtx C) D {
 					return w.button(gtx, w.b("restore"), "ghost", "Restore a save", false, icUpload)
 				}),
 				layout.Rigid(gap(4)),
@@ -1406,7 +1468,9 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 		})
 	} else if st.Phase == "play" {
 		blocks = append(blocks, w.tiles)
-		blocks = append(blocks, w.wcCard)
+		if st.Game != nil && (wcGame(st.Game.Code) || st.WCHack) && !st.Settings.WonderCardsOff {
+			blocks = append(blocks, w.wcCard)
+		}
 		c := st.Controller
 		if c.Enabled && c.ScriptConnected {
 			if w.liveOn {
@@ -2004,6 +2068,29 @@ func (w *Window) settingsDialog(gtx C) {
 		}
 	}
 
+	// a labelled text box (the Discord settings)
+	field := func(name, hint string, ed *widget.Editor) layout.FlexChild {
+		return layout.Rigid(func(gtx C) D {
+			return layout.Inset{Bottom: 10}.Layout(gtx, func(gtx C) D {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx C) D { return w.label(gtx, 13, font.Normal, w.pal.muted, name) }),
+					layout.Rigid(gap(4)),
+					layout.Rigid(func(gtx C) D {
+						gtx.Constraints.Min.X = gtx.Constraints.Max.X
+						return w.box(gtx, w.pal.bg, w.pal.border, 8, 0, func(gtx C) D {
+							return layout.Inset{Left: 10, Right: 10, Top: 8, Bottom: 8}.Layout(gtx, func(gtx C) D {
+								e := material.Editor(w.th, ed, hint)
+								e.Color, e.HintColor = w.pal.text, w.pal.muted
+								e.Font.Typeface = w.face
+								e.TextSize = 14
+								return e.Layout(gtx)
+							})
+						})
+					}))
+			})
+		})
+	}
+
 	div := layout.Rigid(func(gtx C) D {
 		fill(gtx, image.Pt(gtx.Constraints.Max.X, gtx.Dp(1)), 0, w.pal.border)
 		return D{Size: image.Pt(gtx.Constraints.Max.X, gtx.Dp(1))}
@@ -2022,19 +2109,18 @@ func (w *Window) settingsDialog(gtx C) {
 		var d D
 		dialog := func(gtx C) D {
 			d = w.box(gtx, w.pal.surface, w.pal.border, 16, 24, func(gtx C) D {
-				rows := func(gtx C) D {
+				main := func(gtx C) D {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						row("mGBA", "", mg, func(gtx C) D { return w.button(gtx, w.b("browse-mgba-set"), "secondary", "Change…", false, nil) }),
 						div,
 						row("Games folder", "", fo, func(gtx C) D { return w.button(gtx, w.b("browse-folder-set"), "secondary", "Change…", false, nil) }),
 						div,
-						row("Use the GBA as a controller", "The GBA's buttons control the game in mGBA while you play. Its menu (hold SELECT) also shows Pokémon RNG, wild and trainer info, and the map.", "", sw(&w.setCtl)),
-						div,
-						row("Use the cartridge's clock", "Pokémon Ruby, Sapphire and Emerald: mGBA's clock starts from your cartridge's clock, so berries, tides and daily events carry on the same when you go back to the GBA. Turn it off to use this PC's clock.", "", sw(&w.setClock)),
-						div,
-						row("Fix Emerald's starting seed", "Pokémon Emerald has a bug: its RNG starts from the same seed every time. With this on, the game gets a random seed when it starts in mGBA, the way it was meant to. Turn it off if your RNG manipulation relies on the old seed.", "", sw(&w.setSeed)),
+						row("Use the GBA as a controller", "The GBA's buttons control the game in mGBA while you play. Hold SELECT on the GBA for its menu.", "", sw(&w.setCtl)),
 						div,
 						row("Ask me straight away", "If you save while the GBA is off, ask to switch it on right then, instead of when mGBA closes.", "", sw(&w.setAsk)),
+						div,
+						row("Pokémon Enhancements", "Wonder Cards (including your own .wc3 files), the cartridge's clock, Emerald's seed fix and Discord shiny alerts, for Ruby, Sapphire, Emerald, FireRed and LeafGreen.", "",
+							func(gtx C) D { return w.button(gtx, w.b("set-pokemon"), "secondary", "Open ›", false, nil) }),
 						div,
 						row("Version "+appVersion, "Updates come from github.com/Shinygati/GB-Link-Companion (Releases). It checks when it starts.", st.Update.Text,
 							func(gtx C) D {
@@ -2053,8 +2139,94 @@ func (w *Window) settingsDialog(gtx C) {
 						row("No-Intro database", "Used to check that backups and games are good dumps. For a newer one, download the GBA DAT from datomatic.no-intro.org.", st.DATInfo,
 							func(gtx C) D { return w.button(gtx, w.b("load-dat"), "secondary", "Load a DAT file…", false, nil) }))
 				}
+				section := func(t string) layout.FlexChild {
+					return layout.Rigid(func(gtx C) D {
+						return layout.Inset{Top: 18, Bottom: 2}.Layout(gtx, func(gtx C) D {
+							return w.label(gtx, 12.5, font.Bold, w.pal.accent, strings.ToUpper(t))
+						})
+					})
+				}
+				pokemon := func(gtx C) D {
+					custom := customWonderCards()
+					kids := []layout.FlexChild{
+						layout.Rigid(func(gtx C) D {
+							return layout.Inset{Top: 4}.Layout(gtx, func(gtx C) D {
+								return w.label(gtx, 13, font.Normal, w.pal.muted, "Extras for Pokémon Ruby, Sapphire, Emerald, FireRed and LeafGreen. Other games aren't affected by anything here.")
+							})
+						}),
+						section("Wonder Cards"),
+						row("Wonder Cards while you play", "Emerald, FireRed and LeafGreen: show the Wonder Cards button on the play screen, to send cards to the game in mGBA.", "", sw(&w.setWC)),
+						div,
+						row("Wonder Cards on your GBA", "Send cards to retail English Emerald on a real GBA over GB-Link, without mGBA.", "",
+							func(gtx C) D { return w.button(gtx, w.b("gbawc"), "secondary", "Start…", false, icGamepad) }),
+						div,
+						row("Your own Wonder Cards", "Add .wc3 files and they show under “"+customWCGroup+"” in the Wonder Cards list. "+
+							"A card is made for one game and language, so only use one made for the game you're playing.", "",
+							func(gtx C) D {
+								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("wc-folder"), "ghost", "Folder", false, icFolder) }),
+									layout.Rigid(gap(6)),
+									layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("wc-import"), "secondary", "Add .wc3 files…", false, nil) }))
+							}),
+					}
+					if len(custom) == 0 {
+						kids = append(kids, layout.Rigid(func(gtx C) D {
+							return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx C) D {
+								return w.label(gtx, 13, font.Normal, w.pal.muted, "No cards of your own yet.")
+							})
+						}))
+					}
+					for _, c := range custom {
+						kids = append(kids, layout.Rigid(func(gtx C) D {
+							return layout.Inset{Bottom: 6}.Layout(gtx, func(gtx C) D {
+								gtx.Constraints.Min.X = gtx.Constraints.Max.X
+								return w.box(gtx, w.pal.bg, w.pal.border, 8, 10, func(gtx C) D {
+									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+										layout.Flexed(1, func(gtx C) D {
+											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+												layout.Rigid(func(gtx C) D { return w.labelMax(gtx, 14, font.SemiBold, w.pal.text, c.Label, 1) }),
+												layout.Rigid(func(gtx C) D { return w.labelMax(gtx, 12.5, font.Normal, w.pal.muted, c.Description, 2) }))
+										}),
+										layout.Rigid(gap(10)),
+										layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("wc-rm:"+c.File), "ghost", "Remove", false, icRemove) }))
+								})
+							})
+						}))
+					}
+					kids = append(kids,
+						section("Game tweaks"),
+						row("Use the cartridge's clock", "Ruby, Sapphire and Emerald: mGBA's clock starts from your cartridge's clock, so berries, tides and daily events carry on the same when you go back to the GBA. Turn it off to use this PC's clock.", "", sw(&w.setClock)),
+						div,
+						row("Fix Emerald's starting seed", "Emerald has a bug: its RNG starts from the same seed every time. With this on, the game gets a random seed when it starts in mGBA, the way it was meant to. Turn it off if your RNG manipulation relies on the old seed.", "", sw(&w.setSeed)),
+						section("Shiny alerts"),
+						row("Discord shiny alerts", "Post to a Discord channel when a shiny wild Pokémon appears. Use a bot (token + channel ID: it needs View Channel, Send Messages and Attach Files there) or a channel webhook URL.", "", sw(&w.setDiscord)),
+						field("Bot token", "Bot token (from discord.com/developers)", &w.dcToken),
+						field("Channel ID", "Channel ID (right-click the channel with Developer Mode on)", &w.dcChannel),
+						field("Webhook URL (used instead of the bot, if filled in)", "https://discord.com/api/webhooks/…", &w.dcHook),
+						field("Message: {pokemon} {level} {game} {encounters}", defaultDiscordMessage, &w.dcMsg),
+						field("Seconds to wait for the Pokémon to be fully on screen (default "+strconv.Itoa(defaultDiscordDelay)+")", strconv.Itoa(defaultDiscordDelay), &w.dcDelay),
+						row("Attach pictures", "The encounter as mGBA shows it, and the wild Pokémon's info screen.", "", sw(&w.setDcShots)),
+						layout.Rigid(func(gtx C) D {
+							return layout.Inset{Bottom: 14}.Layout(gtx, func(gtx C) D {
+								return w.button(gtx, w.b("discord-test"), "secondary", "Send a test message", false, nil)
+							})
+						}))
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, kids...)
+				}
+				rows, title := main, "Settings"
+				if w.setPage == "pokemon" {
+					rows, title = pokemon, "Pokémon Enhancements"
+				}
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx C) D { return w.label(gtx, 19, font.SemiBold, w.pal.text, "Settings") }),
+					layout.Rigid(func(gtx C) D {
+						if w.setPage == "" {
+							return w.label(gtx, 19, font.SemiBold, w.pal.text, title)
+						}
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("set-back"), "ghost", "‹ Settings", false, nil) }),
+							layout.Rigid(gap(6)),
+							layout.Flexed(1, func(gtx C) D { return w.label(gtx, 19, font.SemiBold, w.pal.text, title) }))
+					}),
 					layout.Flexed(1, func(gtx C) D { // scrolls when the window is short
 						return w.setList.List.Layout(gtx, 1, func(gtx C, _ int) D { return rows(gtx) }) // scrolls, no scroll bar
 					}),

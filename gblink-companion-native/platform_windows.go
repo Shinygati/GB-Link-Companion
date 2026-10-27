@@ -162,6 +162,62 @@ func pickFile(title, filterName, pattern, initialDir string) (string, error) {
 	return syscall.UTF16ToString(buf), nil
 }
 
+// pickFiles shows the Windows "Open" dialog with more than one file allowed. Returns nil if cancelled.
+func pickFiles(title, filterName, pattern, initialDir string) ([]string, error) {
+	if p := os.Getenv("GBLINK_TEST_PICK"); p != "" { // tests
+		return []string{p}, nil
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	buf := make([]uint16, 1<<16)
+	filter := filterString(filterName, pattern)
+	t := utf16z(title)
+	var dir []uint16
+	ofn := openFileName{
+		lpstrFilter: &filter[0], nFilterIndex: 1, lpstrFile: &buf[0], nMaxFile: uint32(len(buf)),
+		lpstrTitle: &t[0], Flags: 0x1000 | 0x800 | 0x8 | 0x80000 | 0x200, // ... EXPLORER ALLOWMULTISELECT
+	}
+	if initialDir != "" && initialDir != "." {
+		dir = utf16z(initialDir)
+		ofn.lpstrInitialDir = &dir[0]
+	}
+	ofn.hwndOwner, _, _ = pGetForeground.Call()
+	ofn.lStructSize = uint32(unsafe.Sizeof(ofn))
+	r, _, _ := pGetOpenFileName.Call(uintptr(unsafe.Pointer(&ofn)))
+	if r == 0 {
+		if code, _, _ := pCommDlgError.Call(); code != 0 {
+			return nil, fmt.Errorf("the file picker didn't open (error %#x)", code)
+		}
+		return nil, nil // cancelled
+	}
+	return splitMultiSelect(buf), nil
+}
+
+// splitMultiSelect: the dialog's answer, "C:\path\file.wc3\0\0" for one file or
+// "C:\folder\0a.wc3\0b.wc3\0\0" for more.
+func splitMultiSelect(buf []uint16) []string {
+	var parts []string
+	start := 0
+	for i, c := range buf {
+		if c != 0 {
+			continue
+		}
+		if i == start {
+			break
+		}
+		parts = append(parts, syscall.UTF16ToString(buf[start:i]))
+		start = i + 1
+	}
+	if len(parts) <= 1 {
+		return parts
+	}
+	var out []string
+	for _, f := range parts[1:] {
+		out = append(out, filepath.Join(parts[0], f))
+	}
+	return out
+}
+
 // pickFolder shows the Windows folder picker. Returns "" if cancelled.
 func pickFolder(title string) (string, error) {
 	runtime.LockOSThread()

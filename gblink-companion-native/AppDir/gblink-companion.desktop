@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=GB-Link Companion
+Exec=GBLinkCompanion
+Icon=gblink-companion
+Categories=Game;Utility;
+Terminal=false

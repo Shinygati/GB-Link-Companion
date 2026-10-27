@@ -2,14 +2,14 @@
   "FixedFileInfo": {
     "FileVersion": {
       "Major": 1,
-      "Minor": 3,
-      "Patch": 1,
+      "Minor": 4,
+      "Patch": 0,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 1,
-      "Minor": 3,
-      "Patch": 1,
+      "Minor": 4,
+      "Patch": 0,
       "Build": 0
     },
     "FileFlagsMask": "3f",
@@ -22,12 +22,12 @@
     "Comments": "GB-Link Companion",
     "CompanyName": "Shinygati",
     "FileDescription": "GB-Link Companion",
-    "FileVersion": "1.3.1",
+    "FileVersion": "1.4.0",
     "InternalName": "GB-Link Companion",
     "LegalCopyright": "",
     "OriginalFilename": "GB-Link-Companion.exe",
     "ProductName": "GB-Link Companion",
-    "ProductVersion": "1.3.1"
+    "ProductVersion": "1.4.0"
   },
   "VarFileInfo": {
     "Translation": {

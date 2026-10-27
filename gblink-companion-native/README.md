@@ -125,7 +125,7 @@ While you play, the GBA has a menu (it opens on it the first time). When mGBA cl
 | **Wild Pokémon** | The wild Pokémon in the battle, with its front sprite (shiny colours if it's shiny): level, gender, nature, ability, IVs, HP, status, PID and the frame it was made on. Also its catch rate, the catch rate right now after its HP and status, and the chance of catching it with a Poké, Great and Ultra Ball this turn. |
 | ↳ in the **Safari Zone** | The same, then the Safari Ball's chance, the flee chance each turn, and the rocks/bait (FireRed, LeafGreen) or Pokéblocks/going near (Ruby, Sapphire, Emerald) that changed them. |
 | **Trainer's team** | The trainer's whole team with party icons, including Pokémon not sent out yet: level, gender, nature, ability, HP, PID and IVs, and which one is out or has fainted. |
-| **Map location** | The game's own region map with your icon, the place's name and your X/Y, and how many trainers you haven't battled and hidden items you haven't found there. **A** shows a cursor (move it with the D-pad to see any place's numbers); **A** again shows a zoomed-out picture of that place; **B** goes back. |
+| **Map location** | The game's own region map with your icon, the place's name and your X/Y, and how many trainers you haven't battled and hidden items you haven't found there. In FireRed and LeafGreen it switches to the Sevii Islands' maps (One–Three, Four–Five, Six–Seven) when you're there, as the game's own map does. A **roaming Pokémon** (Latias/Latios, or Entei/Raikou/Suicune) shows as its icon where it is now; put the cursor on it to see which one and its level. **A** shows a cursor (move it with the D-pad to see any place's numbers); **A** again shows a zoomed-out picture of that place; **B** goes back. |
 | **Encounter tracker** | Counts every wild Pokémon you meet while it's on (**START**), with the last one seen. **A** sets the count digit by digit. Saved per game. |
 
 On the GBA: **Up/Down** and **A** choose in the menu, **B** goes back to it, **Left/Right** go to the next screen, and **Up/Down** (or **L/R** a page at a time) scroll a long screen.
@@ -135,14 +135,26 @@ On the GBA: **Up/Down** and **A** choose in the menu, **B** goes back to it, **L
 - **Games:** Pokémon Ruby, Sapphire, Emerald, FireRed and LeafGreen, every revision, in English, French, German, Italian, Spanish and Japanese. The GBA's helper, menu and screens are in the game's language (Japanese in kana). For the games other than English and German Ruby/Sapphire, the app finds where the game keeps its data when you press Play, and the Log says so (or why it couldn't).
 - **Shinygati's QoL builds:** [pokeemeraldQoL](https://github.com/Shinygati/pokeemeraldQoL) (Emerald) and [pokefireredQoL](https://github.com/Shinygati/pokefireredQoL) (FireRed/LeafGreen v1.1), as built from their `master` branches with `make` (agbcc). The menu has no RNG screen for these.
 - **Your own builds of the decomps** (including newer QoL builds, whose data moves whenever the code changes): put the build's symbol file next to the ROM: `pokeemerald.sym` (from `make syms`) or `pokeemerald.elf`, in the same folder as the ROM (the ROM can have another name). The app checks it belongs to that ROM (the Log says if it doesn't) and reads the addresses from it; the menu has no RNG screen for these either.
-- **Other ROM hacks** move the game's data around, so the screens say they can't read them; controller mode still works.
+- **ROM hacks with a .sym file:** a hack built from pret's pokeruby, pokeemerald or pokefirered that comes with its symbol file works the same way: put the `.sym` (or `.elf`) next to the ROM. Hacks that renamed Pokémon or natures, or gave the ROM a game code of its own, are fine: the app checks the names are where the symbols say, and tells which game the hack is built from by its symbols. Hacks built on **pokeemerald-expansion** lay their Pokémon data out differently and aren't supported yet (the Log says so).
+- **Other ROM hacks** (no .sym) move the game's data around, so the screens say they can't read them; controller mode still works.
 - **Other games:** the controller works as usual; the screens say the game isn't supported.
-- **Pokémon Emerald's starting seed.** The original Emerald never seeds its RNG, so it starts from the same seed every time. When it starts in mGBA, the script gives it a random 16-bit seed instead, the way the game was meant to (the RNG screen marks it as set by GB-Link Companion). Turn **Fix Emerald's starting seed** off in Settings if your RNG manipulation relies on the old seed.
+- **Pokémon Emerald's starting seed.** The original Emerald never seeds its RNG, so it starts from the same seed every time. When it starts in mGBA, the script gives it a random 16-bit seed instead, the way the game was meant to (the RNG screen marks it as set by GB-Link Companion). Turn **Fix Emerald's starting seed** off in Settings › Pokémon Enhancements if your RNG manipulation relies on the old seed.
 - **The initial seed** is the 16-bit seed the game started from. If the game has been running for a long time before the script started, the app can't be sure which it was, so it counts the advances from when the script started instead.
 - **When you save,** the GBA shows the save being copied to the cartridge, then goes back to the screen you were on.
 - The screens come from the same mGBA script as the controller (`gblink_controller.lua`), so it needs to be loaded (see below). The app remembers which screen you were on.
 
 ---
+
+## Shiny alerts on Discord
+
+Settings › Pokémon Enhancements › **Discord shiny alerts** posts to a Discord channel when a shiny wild Pokémon appears in mGBA.
+
+- **Bot:** make an application at discord.com/developers, add a bot, invite it to your server with *View Channel*, *Send Messages* and *Attach Files*, then paste its token and the channel's ID (Discord's Developer Mode lets you copy it). **Or** paste a channel **webhook URL**, which is used instead of the bot when it's filled in.
+- **Message:** your own text, with `{pokemon}`, `{level}`, `{game}` and `{encounters}` filled in (the encounter counter, or this session's count when the counter is off). `@here` and `<@user>` work as in any Discord message.
+- **Pictures:** the encounter as mGBA shows it, and the wild Pokémon's info screen (the GBA's *Wild* screen, whatever the GBA is showing). The script waits a few seconds of game time after the Pokémon appears (5 by default; the setting is in the same place) so it's fully on screen.
+- **Send a test message** checks the token and channel without waiting for a shiny.
+
+The token is kept in the app's settings file on your PC, so only use a bot made for this.
 
 ## Wonder Cards (Emerald, FireRed, LeafGreen)
 
@@ -151,11 +163,14 @@ While you play, **Wonder Cards…** on the play screen lists every card from the
 - **Use now:** the ticked cards' gifts or effects happen straight away, one after another, as if the deliveryman had just handed each one over. Nothing is saved as a Wonder Card, so the card your game already has stays. Cards marked *until reset* (the speed cards, Walk Through Walls, PC Anywhere and others) keep running until the game is reset; they all use the same spare memory, so only one of them can be on at a time. Ticking one unticks the others, and using one while another is on offers **Replace**: the old one is switched off and the new one goes on.
 - **Receive Wondercard** (one ticked card): the card is saved the way Mystery Gift saves one. Talk to the deliveryman in green on any Pokémon Center's 2F to get the gift (go in again if you're already there), and save in the game to keep the card. A game keeps one card at a time.
 - The ticks are remembered for each game.
+- **Your own cards:** Settings › Pokémon Enhancements › **Add .wc3 files…** (or **Add your own .wc3…** in the list) copies `.wc3` files into the app's settings folder, and they show under **Your cards** for every game of their kind (the English/European games' cards for those, the Japanese games' for the Japanese ones). The list shows what each card says. A card's script is made for one game and language, so only use ones made for the game you're playing. **Remove** takes one out again.
+- **ROM hacks:** a hack of Emerald, FireRed or LeafGreen that comes with its `.sym` (next to the ROM, as for the status screens) can take **your own** `.wc3` cards, ones made for that hack; the GB-Link team's cards only go to the original games. Receiving a card writes it into the save, and a hack may have moved things in it, so the app reads where the hack keeps the card, its script and the event flags from the hack's own code (at the addresses in the `.sym`, each checked by a second routine). If it can't be sure, cards aren't offered and the play screen says why. The list shows a warning to read (and **I understand**) before anything can be sent: a card made for another game can freeze the game or damage the save, so back up your save first.
+- **Wonder Cards while you play** (Settings › Pokémon Enhancements) hides the Wonder Cards card on the play screen if you don't want it. It only shows for Emerald, FireRed and LeafGreen anyway.
 - Every language's Emerald, FireRed and LeafGreen, each with the cards made for it (the Japanese games: Use now only). Only the original games, checked against the No-Intro list of good dumps (a ROM hack or a bad dump can't take them: the cards' code is made for the exact ROMs). Load your game first; a card waits until you can walk around.
 
 ## Wonder Cards on your GBA (retail English Emerald)
 
-**Wonder Cards on your GBA** (top of the game list) sends cards to Pokémon Emerald running on your real GBA, through the GB-Link, without mGBA:
+**Wonder Cards on your GBA** (Settings › Pokémon Enhancements › **Start…**) sends cards to Pokémon Emerald running on your real GBA, through the GB-Link, without mGBA:
 
 1. Press it, then with Emerald in the GBA hold **START and SELECT** while you switch it on. The app sends a small program; the screen flashes yellow, then green, and Emerald starts as usual. Your save isn't touched.
 2. Continue your game and walk around. The app shows **Ready**.
@@ -226,6 +241,8 @@ cp ../b2s/gba/gblink_companion_mb.gba assets/
 | `platform_windows.go` | Windows file and folder pickers |
 | `assets/gblink_companion_mb.gba` | The helper program sent to the GBA: [Burn2Slot for GB-Link](../b2s), built with this app's own screens |
 | `symfile.go` | Your own builds: reads the `.sym`/`.elf` next to the ROM for the script's addresses |
+| `roamer.go` | Finds where the roaming Pokémon is kept (`sRoamerLocation`) in any ROM, for the map screen |
+| `wondercards.go`, `wcgui.go`, `wccustom.go`, `wcsym.go` | Wonder Cards: the GB-Link team's cards, the list in the window, your own `.wc3` files, and ROM hacks with a `.sym` |
 | `status.go` | The GBA's menu and status screens: reads the GBA's buttons, gets screens from the mGBA script, and sends the GBA what changed |
 | `assets/gblink_controller.lua` | The mGBA script: the GBA's buttons into mGBA, and reading the Pokémon game for the status screens. Its addresses come from pret's symbol files ([pokeruby](https://github.com/pret/pokeruby), [pokeemerald](https://github.com/pret/pokeemerald), [pokefirered](https://github.com/pret/pokefirered), `symbols` branches) |
 | `test/status_test.py` | End-to-end test of the status screens: the real helper running in mGBA as the GBA (with screenshots of its screen), and the real script running in libmgba with a test cart (`test/status/`). See `test/status/README.md` |

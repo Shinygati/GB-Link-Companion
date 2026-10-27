@@ -33,6 +33,27 @@ func pickFile(title, filterName, pattern, initialDir string) (string, error) {
 		[]string{"--title", title, "--getopenfilename", initialDir, pattern + "|" + filterName})
 }
 
+// pickFiles lets the player choose one or more files. Returns nil if cancelled.
+func pickFiles(title, filterName, pattern, initialDir string) ([]string, error) {
+	if initialDir == "" || initialDir == "." {
+		initialDir, _ = os.UserHomeDir()
+	}
+	out, err := picker([]string{"--file-selection", "--multiple", "--separator=\n", "--title=" + title,
+		"--file-filter=" + filterName + " | " + pattern, "--file-filter=All files | *",
+		"--filename=" + strings.TrimSuffix(initialDir, "/") + "/"},
+		[]string{"--title", title, "--multiple", "--separate-output", "--getopenfilename", initialDir, pattern + "|" + filterName})
+	if err != nil || out == "" {
+		return nil, err
+	}
+	var paths []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			paths = append(paths, l)
+		}
+	}
+	return paths, nil
+}
+
 func pickFolder(title string) (string, error) {
 	home, _ := os.UserHomeDir()
 	return picker([]string{"--file-selection", "--directory", "--title=" + title},

@@ -84,6 +84,7 @@ func (a *App) gbaWonderCards() error {
 		st.Controller = ControllerView{}
 		st.Log = nil
 		st.WCGame, st.WCWhy, st.WCStatus, st.WCChosen, st.WCReplace = wcGBAKey, "", "", nil, nil
+		st.WCHack = false
 		st.GBAWC = ""
 	})
 	go g.run()

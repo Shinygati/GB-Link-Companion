@@ -145,6 +145,7 @@ type screen struct {
 	sprites []stSprite
 	picture *stPic
 	bg      string            // the region map picture to show under the map (see Bridge.bgs)
+	roamer  [2]int            // the roaming Pokémon's cell on the map, if it's on this one (else -1, -1)
 	icons   map[string][]byte // the game's map icons: hero, cursor (16 colours + 4 tiles)
 }
 
@@ -251,6 +252,13 @@ func (b *Bridge) readScript(c net.Conn) {
 				b.encShiny = f[2] == "1"
 				b.mu.Unlock()
 			}
+		case 'Y': // a shiny is fully on screen: id, species, level, the game's picture ("" none) (discord.go)
+			f := strings.Split(line[1:], "\t")
+			if len(f) == 4 {
+				b.mu.Lock()
+				b.shinyQ = append(b.shinyQ, shinyJob{species: f[1], level: f[2], shot: f[3]})
+				b.mu.Unlock()
+			}
 		case 'B':
 			f := strings.SplitN(line[1:], "\t", 2)
 			if len(f) == 2 {
@@ -266,7 +274,7 @@ func (b *Bridge) readScript(c net.Conn) {
 			if err != nil || m < modeRNG || m > modeMap {
 				continue
 			}
-			scr := &screen{}
+			scr := &screen{roamer: [2]int{-1, -1}}
 			for _, p := range parts[1:] {
 				if p == "" {
 					continue
@@ -281,6 +289,13 @@ func (b *Bridge) readScript(c net.Conn) {
 				}
 				if p[0] == 'R' {
 					scr.bg = p[1:]
+					continue
+				}
+				if p[0] == 'Q' { // the roamer's cell: "Q<x>,<y>"
+					var x, y int
+					if n, _ := fmt.Sscanf(p[1:], "%d,%d", &x, &y); n == 2 {
+						scr.roamer = [2]int{x, y}
+					}
 					continue
 				}
 				if p[0] == 'I' {
@@ -658,32 +673,41 @@ func (b *Bridge) sendCursor() {
 // selectHold: on a status screen, holding SELECT on its own for half a second turns "the GBA's
 // buttons control mGBA" on or off, so you can play and watch the screen. A short SELECT press
 // still reaches the game (when it's on). Returns true when it toggled.
+//
+// The hold only counts while SELECT is the only button down. If any other button joins it (SELECT
+// + A, or A first and then SELECT) it's just play: that press can't toggle anything, even if the
+// other buttons are let go while SELECT is still down, until every button has been released.
 func (b *Bridge) selectHold(keys int) bool {
 	st := &b.st
 	now := time.Now()
-	if keys == kSelect {
-		if st.selDown.IsZero() {
-			st.selDown, st.selDone = now, false
+	if keys == 0 { // everything let go: a new hold can start
+		if !st.selDown.IsZero() && !st.selDone && st.passthru {
+			st.selTap = now.Add(100 * time.Millisecond) // a quick SELECT: the game gets it
 		}
-		if !st.selDone && now.Sub(st.selDown) > 500*time.Millisecond {
-			st.selDone = true
-			st.passthru = !st.passthru
-			st.suppress = !st.passthru // turning it off: ignore buttons until they're let go
-			st.prevKeys = keys
-			on := st.passthru
-			b.s.ui.SetController(func(c *ControllerView) { c.Passthru = on })
-			if on {
-				b.s.ui.Log("The GBA's buttons control mGBA while it shows %s (hold SELECT to stop).", modeTitles[st.mode])
-			}
-			return true
-		}
+		st.selDown, st.selDone = time.Time{}, false
 		return false
 	}
-	if !st.selDown.IsZero() && !st.selDone && keys == 0 && st.passthru {
-		st.selTap = now.Add(100 * time.Millisecond) // a quick SELECT: the game gets it
+	if keys != kSelect { // SELECT with other buttons (or no SELECT): not the hold, until all are let go
+		st.selDown, st.selDone = time.Time{}, true
+		return false
 	}
-	if keys&kSelect == 0 {
-		st.selDown = time.Time{}
+	if st.selDone { // this press already toggled, or other buttons were involved
+		return false
+	}
+	if st.selDown.IsZero() {
+		st.selDown = now
+	}
+	if now.Sub(st.selDown) > 500*time.Millisecond {
+		st.selDone = true
+		st.passthru = !st.passthru
+		st.suppress = !st.passthru // turning it off: ignore buttons until they're let go
+		st.prevKeys = keys
+		on := st.passthru
+		b.s.ui.SetController(func(c *ControllerView) { c.Passthru = on })
+		if on {
+			b.s.ui.Log("The GBA's buttons control mGBA while it shows %s (hold SELECT on its own to stop).", modeTitles[st.mode])
+		}
+		return true
 	}
 	return false
 }
@@ -967,9 +991,11 @@ func (b *Bridge) compose() (cellText, *stMap, map[int]placed, map[int][]byte) {
 				hh.Write(d)
 				want[slot], data[slot] = placed{x, y, 16, 16, hh.Sum64(), true}, d
 			}
+			// the lower slot is drawn on top: the cursor, then the roaming Pokémon, then you
 			at(7, "hero", scr.grid.px, scr.grid.py)
+			at(6, "roamer", scr.roamer[0], scr.roamer[1])
 			if st.curOn {
-				at(6, "cursor", st.cur[0], st.cur[1])
+				at(5, "cursor", st.cur[0], st.cur[1])
 			}
 		}
 		return t, scr.grid, want, data
@@ -1309,7 +1335,7 @@ func (b *Bridge) statusTick(keys int, show bool) int {
 	}
 	if st.passthru && st.mode != modeMenu {
 		fwd = keys
-		if keys == kSelect { // maybe a hold to turn it off: keep it back (a quick press is sent on release)
+		if keys == kSelect && !st.selDown.IsZero() { // maybe a hold to turn it off: keep it back (a quick press is sent on release)
 			fwd = 0
 		}
 		if keys == 0 && now.Before(st.selTap) {

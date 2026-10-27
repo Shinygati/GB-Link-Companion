@@ -627,7 +627,8 @@ type Bridge struct {
 	encNew      int              // wild Pokemon the script saw, not counted yet
 	encLast     string           // the last one: "ZIGZAGOON Lv3"
 	encShiny    bool
-	lang        byte // the game's language (lang.go): the status screens' text and font
+	shinyQ      []shinyJob // shinies the script reported, not posted to Discord yet (discord.go)
+	lang        byte       // the game's language (lang.go): the status screens' text and font
 }
 
 func newBridge(s *Session) (*Bridge, error) {
@@ -683,9 +684,9 @@ func (b *Bridge) stop() {
 
 // sendOptions tells the script the settings it uses (only when they change, or force).
 func (b *Bridge) sendOptions() {
-	opt := "F1\n" // fix Emerald's starting seed
-	if b.s.app.settings().KeepEmeraldSeed {
-		opt = "F0\n"
+	opt := b.optionLines() // Emerald's seed, shiny pictures (discord.go)
+	if strings.Contains(opt, "X1\t") {
+		os.MkdirAll(shinyShotDir(), 0o755) // where the script puts the game's picture
 	}
 	b.mu.Lock()
 	b.lastOpt = opt
@@ -784,6 +785,7 @@ func (b *Bridge) pollLoop() {
 		default:
 		}
 		keys, fwd := -1, 0
+		b.handleShiny() // a shiny to post to Discord (even with the GBA off)
 		s.linkMu.Lock()
 		if !b.online && misses >= 15 {
 			b.tryRestart()
@@ -835,7 +837,7 @@ func (b *Bridge) pollLoop() {
 			b.mu.Lock()
 			old := b.lastOpt
 			b.mu.Unlock()
-			if want := map[bool]string{false: "F1\n", true: "F0\n"}[s.app.settings().KeepEmeraldSeed]; want != old {
+			if want := b.optionLines(); want != old {
 				b.sendOptions()
 			}
 			b.rewriteLua()

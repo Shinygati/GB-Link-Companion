@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"debug/elf"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,6 +46,31 @@ var symFields = []struct {
 	{"rmHeroinePal", []string{"sRegionMapPlayerIcon_MayPal", "sRegionMapMayIcon_Pal", "sPlayerIcon_LeafPal"}},
 	{"layoutKanto", []string{"sRegionMapSections_Kanto"}}, {"layoutSevii123", []string{"sRegionMapSections_Sevii123"}},
 	{"layoutSevii45", []string{"sRegionMapSections_Sevii45"}}, {"layoutSevii67", []string{"sRegionMapSections_Sevii67"}},
+	{"roamerLoc", []string{"sRoamerLocation"}}, // the roamer's map (roamer.go)
+	// the Wonder Cards' script engine, and when you're walking around
+	{"scriptCtx", []string{"sGlobalScriptContext"}}, {"scriptStatus", []string{"sGlobalScriptContextStatus"}},
+	{"lockControls", []string{"sLockFieldControls"}}, {"cmdTable", []string{"gScriptCmdTable"}},
+	{"cmdTableEnd", []string{"gScriptCmdTableEnd"}}, {"ramScriptRet", []string{"gRamScriptRetAddr"}},
+	{"intrTable", []string{"gIntrTable"}}, {"cb1Overworld", []string{"CB1_Overworld"}}, {"cb2Overworld", []string{"CB2_Overworld"}},
+	{"helpRDisable", []string{"gHelpSystemToggleWithRButtonDisabled"}},
+}
+
+// symGame: which game a build is, from its symbols, for ROM hacks that changed the game code in
+// the ROM's header: FireRed/LeafGreen have the Sevii Islands, Emerald keeps its save behind a
+// pointer (and has the Battle Frontier), Ruby/Sapphire neither.
+func symGame(syms map[string]uint32) string {
+	_, sevii := syms["sSeviiMapsecs"]
+	_, kanto := syms["sRegionMapSections_Kanto"]
+	_, ptr := syms["gSaveBlock1Ptr"]
+	switch {
+	case sevii || kanto:
+		return "FIRERED"
+	case ptr:
+		return "EMERALD"
+	case syms["gSaveBlock1"] != 0:
+		return "RUBY"
+	}
+	return ""
 }
 
 var gameByCode = map[string]string{"AXV": "RUBY", "AXP": "SAPPHIRE", "BPE": "EMERALD", "BPR": "FIRERED", "BPG": "LEAFGREEN"}
@@ -104,8 +130,11 @@ func symMatchesROM(rom []byte, syms map[string]uint32) bool {
 		return off >= 0 && off+int64(len(want)) <= int64(len(rom)) && string(rom[off:off+int64(len(want))]) == string(want)
 	}
 	sp, ok := syms["gSpeciesNames"]
-	if !ok || !at(sp+11, names[0]) {
+	if !ok {
 		return false
+	}
+	if !at(sp+11, names[0]) { // a ROM hack may have renamed them: then the names must at least be names
+		return symNamesLookRight(rom, syms)
 	}
 	nat, ok := syms["gNatureNamePointers"]
 	if !ok {
@@ -117,6 +146,49 @@ func symMatchesROM(rom []byte, syms map[string]uint32) bool {
 	o := nat - 0x08000000
 	p := uint32(rom[o]) | uint32(rom[o+1])<<8 | uint32(rom[o+2])<<16 | uint32(rom[o+3])<<24
 	return at(p, names[4])
+}
+
+// symNamesLookRight: for a ROM hack whose names differ from the original game's, are there names
+// (the games' text, each ended by 0xFF in its 11 bytes) where the build's species and nature names
+// should be? A .sym from another build points somewhere else, and that isn't text.
+func symNamesLookRight(rom []byte, syms map[string]uint32) bool {
+	set := gameCharset()["intl"]
+	isName := func(off int64, max int) bool {
+		if off < 0 || off+int64(max) > int64(len(rom)) {
+			return false
+		}
+		for i := 0; i < max; i++ {
+			c := rom[off+int64(i)]
+			if c == 0xFF {
+				return i > 0
+			}
+			if _, ok := set[c]; !ok {
+				return false
+			}
+		}
+		return false
+	}
+	sp := int64(syms["gSpeciesNames"]) - 0x08000000
+	for s := int64(1); s <= 25; s++ { // the first 25 Pokémon
+		if !isName(sp+11*s, 11) {
+			return false
+		}
+	}
+	nat, ok := syms["gNatureNamePointers"]
+	if !ok {
+		nat, ok = syms["gNatureNames"]
+	}
+	o := int64(nat) - 0x08000000
+	if !ok || o < 0 || o+25*4 > int64(len(rom)) {
+		return false
+	}
+	for n := int64(0); n < 25; n++ {
+		p := int64(binary.LittleEndian.Uint32(rom[o+4*n:])) - 0x08000000
+		if !isName(p, 13) {
+			return false
+		}
+	}
+	return true
 }
 
 func readSymbols(path string) (map[string]uint32, error) {
@@ -166,42 +238,20 @@ func readSymbols(path string) (map[string]uint32, error) {
 // no symbol file or it isn't a Pokemon game's.
 func luaOverride(rom, code string, log func(string, ...any)) string {
 	game := gameByCode[strings.ToUpper(code[:min(3, len(code))])]
-	if game == "" {
-		return ""
-	}
-	cands := symCandidates(rom)
-	if len(cands) == 0 {
-		return ""
-	}
-	romData, err := os.ReadFile(rom)
-	if err != nil {
-		log("Couldn't read %s (%v).", filepath.Base(rom), err)
-		return ""
-	}
-	var syms map[string]uint32
-	var wrong []string
-	path := ""
-	for _, c := range cands {
-		sy, err := readSymbols(c)
-		if err != nil {
-			log("Couldn't read %s (%v).", filepath.Base(c), err)
-			continue
-		}
-		if symMatchesROM(romData, sy) {
-			syms, path = sy, c
-			break
-		}
-		if _, ok := sy["gSpeciesNames"]; ok {
-			wrong = append(wrong, filepath.Base(c))
-		}
-	}
+	syms, path, romData := matchingSym(rom, log)
 	if syms == nil {
-		for _, w := range wrong {
-			log("%s isn't from the same build as %s (the Pokémon names aren't where it says): make it again with \"make syms\" after building this ROM.", w, filepath.Base(rom))
-		}
 		return ""
 	}
-	parts := []string{fmt.Sprintf("code = %q", code), fmt.Sprintf("game = %q", game), `build = "own build"`, "custom = true"}
+	if game == "" { // a ROM hack with its own game code: which game it's built from
+		if game = symGame(syms); game == "" {
+			log("%s: couldn't tell which Pokémon game this is built from.", filepath.Base(path))
+			return ""
+		}
+		log("%s has its own game code (%s): treating it as %s, from its symbols.", filepath.Base(rom), code, titleCase(game))
+	}
+	// sym: the app checked it against the ROM (the script doesn't check the names again: a hack
+	// may have renamed them)
+	parts := []string{fmt.Sprintf("code = %q", code), fmt.Sprintf("game = %q", game), `build = "own build"`, "custom = true", "sym = true"}
 	if l := gameLang(code); l != 'E' {
 		parts = append(parts, fmt.Sprintf("lang = %q", string(l))) // its names are checked in that language
 	}
@@ -224,6 +274,53 @@ func luaOverride(rom, code string, log func(string, ...any)) string {
 			return ""
 		}
 	}
+	if game == "EMERALD" || game == "FIRERED" || game == "LEAFGREEN" { // your own Wonder Cards (wcsym.go)
+		if o, err := deriveWCOffsets(romData, syms, readSymbolSizes(path)); err == nil {
+			parts = append(parts, luaWCParts(o)...)
+		}
+	}
 	log("Status screens: using the addresses in %s.", filepath.Base(path))
 	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+// matchingSym: the symbols of the .sym/.elf next to the ROM that belongs to it (checked against the
+// ROM), its path and the ROM's bytes; nil if there's none.
+func matchingSym(rom string, log func(string, ...any)) (map[string]uint32, string, []byte) {
+	cands := symCandidates(rom)
+	if len(cands) == 0 {
+		return nil, "", nil
+	}
+	romData, err := os.ReadFile(rom)
+	if err != nil {
+		log("Couldn't read %s (%v).", filepath.Base(rom), err)
+		return nil, "", nil
+	}
+	var syms map[string]uint32
+	var wrong []string
+	path := ""
+	for _, c := range cands {
+		sy, err := readSymbols(c)
+		if err != nil {
+			log("Couldn't read %s (%v).", filepath.Base(c), err)
+			continue
+		}
+		if _, ok := sy["gSpeciesNames"]; !ok {
+			if _, exp := sy["gSpeciesInfo"]; exp && sy["gSaveBlock1Ptr"] != 0 {
+				log("%s is from a pokeemerald-expansion build: its Pokémon data is laid out differently, so the status screens can't read it yet.", filepath.Base(c))
+			}
+			continue
+		}
+		if symMatchesROM(romData, sy) {
+			syms, path = sy, c
+			break
+		}
+		wrong = append(wrong, filepath.Base(c))
+	}
+	if syms == nil {
+		for _, w := range wrong {
+			log("%s isn't from the same build as %s (the Pokémon names aren't where it says): make it again with \"make syms\" after building this ROM.", w, filepath.Base(rom))
+		}
+		return nil, "", nil
+	}
+	return syms, path, romData
 }

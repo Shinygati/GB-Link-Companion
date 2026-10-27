@@ -86,6 +86,7 @@ type State struct {
 	WCGame     string      // the game's Wonder Card folder (wondercards.go), "" if it can't take them
 	GBAWC      string      // Wonder Cards on a real GBA (wcgba.go): starting, ready, busy, away
 	WCWhy      string      // ...and why not
+	WCHack     bool        // a ROM hack with a .sym: only the player's own cards (wcsym.go)
 	WCStatus   string      // what happened to the last card sent
 	WCChosen   []string    // the cards ticked in the list (remembered for the game)
 	WCReplace  *WonderCard // a card waiting for "Replace" (another one that keeps running is on)
@@ -441,12 +442,12 @@ func (a *App) play(rom string) error {
 		st.Cart, st.LastSync, st.GBA, st.Result, st.ResultText = "", "", "", "", ""
 		st.Controller = ControllerView{}
 		st.Log = nil
-		st.WCGame, st.WCWhy, st.WCStatus = "", "", ""
+		st.WCGame, st.WCWhy, st.WCStatus, st.WCHack = "", "", "", false
 		st.WCChosen = g.loadState().WCCards
 	})
 	go func() { // can it take Wonder Cards? (a verified ROM: hashing it can take a moment)
-		key, why := wcCheckROM(g)
-		a.ui.update(func(st *State) { st.WCGame, st.WCWhy = key, why })
+		key, why, hack := wcCheckROM(g)
+		a.ui.update(func(st *State) { st.WCGame, st.WCWhy, st.WCHack = key, why, hack })
 	}()
 	go s.run()
 	return nil

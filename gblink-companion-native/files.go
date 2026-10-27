@@ -45,10 +45,21 @@ type Settings struct {
 	// Pokémon Ruby, Sapphire and Emerald: mGBA's clock follows the PC, not the cartridge's clock
 	// (on by default: mGBA starts from the cartridge's clock, see cartclock.go)
 	PCClock bool `json:"pcClock"`
+	// Pokémon Emerald, FireRed and LeafGreen: hide the Wonder Cards card on the play screen
+	WonderCardsOff bool `json:"wonderCardsOff"`
+
+	// Discord alerts for shiny wild Pokémon (discord.go). A bot token + channel ID, or a webhook URL.
+	DiscordOn      bool   `json:"discordOn"`
+	DiscordToken   string `json:"discordToken,omitempty"`
+	DiscordChannel string `json:"discordChannel,omitempty"`
+	DiscordWebhook string `json:"discordWebhook,omitempty"`
+	DiscordMessage string `json:"discordMessage,omitempty"` // the text posted; {pokemon} {level} {game} {encounters}
+	DiscordShots   bool   `json:"discordShots"`             // attach the encounter and the wild Pokémon's info screen
+	DiscordDelay   int    `json:"discordDelay,omitempty"`   // seconds of game time to wait for the Pokémon to be fully on screen
 }
 
 func loadSettings() Settings {
-	s := Settings{Controller: true}
+	s := Settings{Controller: true, DiscordShots: true}
 	if b, err := os.ReadFile(filepath.Join(configDir(), "settings.json")); err == nil {
 		json.Unmarshal(b, &s)
 	}

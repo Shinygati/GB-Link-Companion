@@ -42,6 +42,8 @@ type WonderCard struct {
 	Description string `json:"description"`
 	File        string `json:"file"`
 	Resident    bool   `json:"resident"` // keeps running until the game is reset
+	Path        string `json:"-"`        // one of the player's own cards (wccustom.go): the file on disk
+	Japanese    bool   `json:"-"`        // ...made for the Japanese games
 }
 
 var wcIndex = sync.OnceValue(func() []WonderCard {
@@ -72,39 +74,67 @@ func wcGameKey(rom string) string {
 	return ""
 }
 
-// wonderCardsFor: the cards for a game key, grouped as on GB-Link's page.
-func wonderCardsFor(key string) []WonderCard {
+// wonderCardsFor: the cards for a game key, grouped as on GB-Link's page, then the player's own.
+// ownOnly: a ROM hack, which takes only the player's own cards.
+func wonderCardsFor(key string, ownOnly bool) []WonderCard {
 	var out []WonderCard
 	for _, c := range wcIndex() {
-		if c.Game == key {
+		if c.Game == key && !ownOnly {
 			out = append(out, c)
 		}
 	}
 	order := map[string]int{"Pokémon Emerald": 0, "FireRed / LeafGreen": 0, "Project Wonder (Goppier)": 1, "GB-Link Team": 2}
 	sort.SliceStable(out, func(i, j int) bool { return order[out[i].Group] < order[out[j].Group] })
+	if key == "" {
+		return out
+	}
+	// the player's own cards (wccustom.go), for every game of their kind, after the GB-Link team's
+	taken := map[string]bool{}
+	for _, c := range out {
+		taken[c.Label] = true
+	}
+	for _, c := range customWonderCards() {
+		if c.Japanese != wcJapanese(key) {
+			continue
+		}
+		c.Game = key
+		for taken[c.Label] {
+			c.Label += " (yours)"
+		}
+		taken[c.Label] = true
+		out = append(out, c)
+	}
 	return out
 }
 
-// wcCheckROM: can this ROM take Wonder Cards? Returns the game key, or why not.
-func wcCheckROM(g *Game) (string, string) {
-	key := wcGameKey(g.ROM)
+// wcCheckROM: can this ROM take Wonder Cards? Returns the game key, or why not. hack: a ROM hack
+// with a .sym that fits, which takes only the player's own cards (wcsym.go).
+func wcCheckROM(g *Game) (key, why string, hack bool) {
+	key = wcGameKey(g.ROM)
 	if key == "" {
-		if c := strings.ToUpper(g.Code); strings.HasPrefix(c, "AXV") || strings.HasPrefix(c, "AXP") {
-			return "", "Ruby and Sapphire have no Wonder Cards: Mystery Gift came with Emerald, FireRed and LeafGreen."
+		if h := hackWonderCards(g.ROM, g.Code); h.key != "" { // a hack with a game code of its own
+			return h.key, "", true
 		}
-		return "", "Wonder Cards are for Pokémon Emerald, FireRed and LeafGreen."
+		if c := strings.ToUpper(g.Code); strings.HasPrefix(c, "AXV") || strings.HasPrefix(c, "AXP") {
+			return "", "Ruby and Sapphire have no Wonder Cards: Mystery Gift came with Emerald, FireRed and LeafGreen.", false
+		}
+		return "", "Wonder Cards are for Pokémon Emerald, FireRed and LeafGreen.", false
 	}
 	h, ok := hashes.get(g.ROM)
 	if !ok {
 		var err error
 		if h, err = hashFile(g.ROM); err != nil {
-			return "", "Couldn't check the ROM (" + err.Error() + ")."
+			return "", "Couldn't check the ROM (" + err.Error() + ").", false
 		}
 	}
 	if st, _ := classify(h.SHA1, g.Code); st != "ok" {
-		return "", "Wonder Cards only go to verified ROMs (a good dump in the No-Intro list), and this one isn't."
+		hw := hackWonderCards(g.ROM, g.Code)
+		if hw.key != "" {
+			return hw.key, "", true
+		}
+		return "", hw.why, false
 	}
-	return key, ""
+	return key, "", false
 }
 
 // wc3Parts: a .wc3's card (332 bytes; the Japanese games' 164), icon species (2) and RAM script
@@ -145,7 +175,13 @@ type wcSender struct {
 // sendWonderCard adds the card to the game ("add"), uses it now ("use"), or uses it now in place of
 // the card that keeps running ("replace").
 func (w *wcSender) sendWonderCard(c WonderCard, how string) error {
-	raw, err := wcFS.ReadFile(path.Join("assets/wondercards", c.File))
+	var raw []byte
+	var err error
+	if c.Path != "" { // one of the player's own cards
+		raw, err = os.ReadFile(c.Path)
+	} else {
+		raw, err = wcFS.ReadFile(path.Join("assets/wondercards", c.File))
+	}
 	if err != nil {
 		return err
 	}
@@ -355,7 +391,7 @@ func (a *App) wcTarget() *wcSender {
 	if s != nil && s.gbawc != nil {
 		w = &s.gbawc.wc
 	} else if s != nil && s.bridge != nil {
-		if key, why := wcCheckROM(s.game); key == "" {
+		if key, why, _ := wcCheckROM(s.game); key == "" {
 			a.ui.update(func(st *State) { st.WCStatus = why })
 			return nil
 		}
@@ -429,6 +465,12 @@ func (a *App) chooseWonderCards(labels []string) {
 	s.state.WCCards = labels
 	s.game.saveState(s.state)
 	s.linkMu.Unlock()
+}
+
+// wcGame: Pokémon Emerald, FireRed or LeafGreen (the games with Wonder Cards), by game code
+func wcGame(code string) bool {
+	c := strings.ToUpper(code)
+	return strings.HasPrefix(c, "BPE") || strings.HasPrefix(c, "BPR") || strings.HasPrefix(c, "BPG")
 }
 
 // wcJapanese: the cards are for a Japanese game (they can only be used now)

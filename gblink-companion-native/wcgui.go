@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 
 	"gioui.org/font"
 	"gioui.org/layout"
@@ -21,7 +22,10 @@ func (w *Window) wcClicks(gtx C) {
 	if w.b("wc-close").Clicked(gtx) || w.b("wc-scrim").Clicked(gtx) {
 		w.wcOpen = false
 	}
-	cards := wonderCardsFor(w.st.WCGame)
+	if w.b("wc-hack-ok").Clicked(gtx) {
+		w.wcHackOK = true
+	}
+	cards := wonderCardsFor(w.st.WCGame, w.st.WCHack)
 	chosen := map[string]bool{}
 	for _, l := range w.st.WCChosen {
 		chosen[l] = true
@@ -63,6 +67,9 @@ func (w *Window) wcClicks(gtx C) {
 		c := *w.st.WCReplace
 		go a.replaceWonderCard(c)
 	}
+	if w.st.WCHack && !w.wcHackOK { // a ROM hack: not before the warning's been read
+		return
+	}
 	if w.b("wc-use").Clicked(gtx) && len(picked) > 0 {
 		a.ui.update(func(st *State) { st.WCStatus, st.WCReplace = "Sending…", nil })
 		go a.useWonderCards(picked)
@@ -86,9 +93,11 @@ func (w *Window) wcCard(gtx C) D {
 	case st.Mode == "gbawc" && st.GBAWC != "ready" && st.GBAWC != "busy":
 		text = "Cards can be sent once you're walking around in the game."
 	case st.Mode == "gbawc":
-		text, can = "Send any of the GB-Link team's Wonder Cards to Emerald on your GBA: add one for the deliveryman to hand over, or use one right where you stand.", true
+		text, can = "Send any of the GB-Link team's Wonder Cards (or your own .wc3 files) to Emerald on your GBA: add one for the deliveryman to hand over, or use one right where you stand.", true
 	case !st.Controller.ScriptConnected:
 		text = "Waiting for mGBA's script (it sends the cards to the game)."
+	case st.WCHack:
+		text, can = "A ROM hack with its .sym file: you can send your own .wc3 cards made for it (Settings › Pokémon Enhancements, or Add your own in the list).", true
 	default:
 		text, can = "Send any of the GB-Link team's Wonder Cards to the game while you play: add one for the deliveryman to hand over, or use one straight away.", true
 		if wcJapanese(st.WCGame) {
@@ -123,7 +132,7 @@ func (w *Window) wcDialog(gtx C) {
 		return D{Size: gtx.Constraints.Max}
 	})
 	st := w.st
-	cards := wonderCardsFor(st.WCGame)
+	cards := wonderCardsFor(st.WCGame, st.WCHack)
 	type row struct {
 		group string
 		card  *WonderCard
@@ -147,16 +156,34 @@ func (w *Window) wcDialog(gtx C) {
 					layout.Rigid(func(gtx C) D {
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 							layout.Flexed(1, func(gtx C) D { return w.label(gtx, 19, font.SemiBold, w.pal.text, "Wonder Cards") }),
+							layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("wc-import-2"), "ghost", "Add your own .wc3…", false, nil) }),
+							layout.Rigid(gap(6)),
 							layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("wc-close"), "secondary", "Done", false, nil) }))
 					}),
 					layout.Rigid(func(gtx C) D {
+						if !st.WCHack {
+							return D{}
+						}
+						return layout.Inset{Top: 10, Bottom: 4}.Layout(gtx, func(gtx C) D { return w.wcHackWarning(gtx) })
+					}),
+					layout.Rigid(func(gtx C) D {
+						if st.WCHack {
+							return layout.Inset{Top: 6, Bottom: 8}.Layout(gtx, func(gtx C) D {
+								t := "Your own cards: tick one or more and Use now runs their gifts or effects straight away; Receive Wondercard saves one for the deliveryman on a Pokémon Center's 2F. "
+								if len(cards) == 0 {
+									t += "You haven't added any yet: press Add your own .wc3…"
+								}
+								return w.label(gtx, 13, font.Normal, w.pal.muted, t)
+							})
+						}
 						return layout.Inset{Top: 6, Bottom: 8}.Layout(gtx, func(gtx C) D {
 							return w.label(gtx, 13, font.Normal, w.pal.muted,
 								"Use now: tick one or more cards and their gifts or effects happen straight away, one after another, and the card your game has stays. "+
 									"Cards marked “until reset” keep running until the game is reset; only one of them can run at a time, so ticking one unticks the other, and using one while another is on offers to replace it. "+
 									"Your ticks are remembered for this game. "+
 									"Receive Wondercard: the card is saved like a Mystery Gift card, for the deliveryman on any Pokémon Center's 2F (save in the game to keep it). "+
-									"Cards from github.com/GB-Link/gblink-wondercards (GPL-3.0), made for your game and its language."+japaneseNote(st.WCGame))
+									"Cards from github.com/GB-Link/gblink-wondercards (GPL-3.0), made for your game and its language. "+
+									"“"+customWCGroup+"” are .wc3 files you added: only use ones made for this game and language."+japaneseNote(st.WCGame))
 						})
 					}),
 					layout.Rigid(func(gtx C) D {
@@ -243,6 +270,9 @@ func (w *Window) wcDialog(gtx C) {
 					}),
 					layout.Rigid(func(gtx C) D {
 						n := len(st.WCChosen)
+						if st.WCHack && !w.wcHackOK {
+							return D{}
+						}
 						return layout.Inset{Top: 10}.Layout(gtx, func(gtx C) D {
 							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 								layout.Rigid(func(gtx C) D {
@@ -278,4 +308,34 @@ func japaneseNote(key string) string {
 		return " The Japanese games can only use a card now: Receive Wondercard isn't offered for them."
 	}
 	return ""
+}
+
+// wcHackWarning: what to know before sending a card to a ROM hack, and "I understand".
+func (w *Window) wcHackWarning(gtx C) D {
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
+	return w.box(gtx, w.pal.warnSoft, color.NRGBA{}, 12, 14, func(gtx C) D {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx C) D {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx C) D { return icon(gtx, icWarn, w.pal.warn, 20) }),
+					layout.Rigid(gap(8)),
+					layout.Flexed(1, func(gtx C) D { return w.label(gtx, 15, font.SemiBold, w.pal.warn, "This is a ROM hack: use at your own risk") }))
+			}),
+			layout.Rigid(gap(6)),
+			layout.Rigid(func(gtx C) D {
+				return w.label(gtx, 13.5, font.Normal, w.pal.text,
+					"Only your own .wc3 cards can go to a ROM hack, and only use ones made for this hack. "+
+						"A card's script was written for one particular game: one made for the original game or another hack can do the wrong thing, "+
+						"freeze the game or damage your save. Where the save keeps the card was read from the hack's .sym file and its code. "+
+						"Back up your save first (keep a copy of the .sav, or make a save state in mGBA).")
+			}),
+			layout.Rigid(func(gtx C) D {
+				if w.wcHackOK {
+					return D{}
+				}
+				return layout.Inset{Top: 10}.Layout(gtx, func(gtx C) D {
+					return w.button(gtx, w.b("wc-hack-ok"), "primary", "I understand", false, nil)
+				})
+			}))
+	})
 }
