@@ -51,7 +51,7 @@ add("BPRE1", { game = "FIRERED", build = "QoL", custom = true, rng = 0x03005000,
 add("BPGE1", { game = "LEAFGREEN", build = "QoL", custom = true, rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08246018, abilityNames = 0x0824FD78, natureNames = 0x084638A4, speciesInfo = 0x082548BC, trainers = 0x0823EC00, classNames = 0x0823E690, mapNames = 0x083F1C1C, seviiMapsecs = 0x083F1A14, mapGroups = 0x083527E4, frontPics = 0x082351E4, palettes = 0x08237444, shinyPalettes = 0x08238204, icons = 0x083D3710, iconPalIdx = 0x083D3DF0, iconPals = 0x083D3FA8, rmTiles = 0x083EF58C, rmPal = 0x083EF24C, rmKanto = 0x083F080C, rmSevii123 = 0x083F0A6C, rmSevii45 = 0x083F0B7C, rmSevii67 = 0x083F0C60, rmCursor = 0x083EF450, rmCursorPal = 0x083EF1CC, rmHero = 0x083EF494, rmHeroPal = 0x083EF1EC, rmHeroine = 0x083EF50C, rmHeroinePal = 0x083EF20C, layoutKanto = 0x083F2400, layoutSevii123 = 0x083F2694, layoutSevii45 = 0x083F2928, layoutSevii67 = 0x083F2BBC, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815FA68, cmdTableEnd = 0x0815FDBC, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x0805687C, cb2Overworld = 0x080568FC })
 
 -- The addresses of your own build, from a .sym file next to the ROM (filled in by GB-Link Companion)
-local OVERRIDE = { code = "BPEE", game = "EMERALD", build = "own build", custom = true, sym = true, rng = 0x03005DA0, party = 0x020244EC, enemy = 0x02024744, sb1ptr = 0x03005DAC, sb2ptr = 0x03005DB0, mapHeader = 0x02037320, main = 0x030022E0, battleType = 0x02022FEC, opponent = 0x02038BD2, battleMons = 0x02024084, battleStructPtr = 0x0202449C, partyIdx = 0x0202406E, speciesNames = 0x0831B8A0, abilityNames = 0x0831E9BB, natureNames = 0x08620634, speciesInfo = 0x083238CC, trainers = 0x08313308, classNames = 0x08312FAC, mapEntries = 0x085A4B3C, frontPics = 0x0830D464, palettes = 0x08306950, shinyPalettes = 0x08307710, icons = 0x0857F1E0, iconPalIdx = 0x0857F8C0, iconPals = 0x0857FA78, mapGroups = 0x08489A78, rmTiles = 0x085A2E3C, rmTilemap = 0x085A3BA0, rmPal = 0x085A2DFC, rmCursor = 0x085A2CCC, rmCursorPal = 0x085A2CAC, rmHero = 0x085A3F0C, rmHeroPal = 0x085A3EEC, rmHeroine = 0x085A3FAC, rmHeroinePal = 0x085A3F8C, roamerLoc = 0x020249C2, scriptCtx = 0x03000E48, scriptStatus = 0x03000E40, lockControls = 0x03000F34, cmdTable = 0x081DE37C, cmdTableEnd = 0x081DE708, ramScriptRet = 0x020375C8, intrTable = 0x03002730, cb1Overworld = 0x08086994, cb2Overworld = 0x080869EC, wcMg = 0x322C, wcRs = 0x3728, wcFlags = 0x1270, wcVars = 0x139C }
+local OVERRIDE = nil
 
 -- Per-game layout differences that the symbol files don't give.
 local FAMILY = {
@@ -203,9 +203,11 @@ local function detect()
   local rev = r8(0x080000BC)
   LANG = code:sub(4, 4)
   -- a game in another language: GB-Link Companion found its addresses in the ROM (romfind.go)
-  if OVERRIDE and OVERRIDE.code == code and (OVERRIDE.found or OVERRIDE.sym) then useBuild(OVERRIDE, rev); return end
+  if OVERRIDE and OVERRIDE.code == code and OVERRIDE.found then useBuild(OVERRIDE, rev); return end
   local builds = {}
-  if OVERRIDE and OVERRIDE.code == code then builds[1] = OVERRIDE end   -- a .sym next to the ROM
+  -- a .sym next to the ROM: used if the ROM's data is where it says (else a .sym that isn't this
+  -- ROM's, e.g. one left next to an unmodified ROM, would make it a "custom build")
+  if OVERRIDE and OVERRIDE.code == code then builds[1] = OVERRIDE end
   for _, v in ipairs(VERSIONS[code .. rev] or {}) do builds[#builds + 1] = v end
   if #builds == 0 then
     unsupported = "This game isn't supported: only Pokemon Ruby, Sapphire, Emerald, FireRed and " ..
@@ -473,8 +475,26 @@ local rngFixed = nil
 -- Only once the game is running: gMain.callback2 is set by InitMainCallbacks(), after AgbMain's
 -- RegisterRamReset() has cleared IWRAM. A seed written before that (during the BIOS intro, or the
 -- first instructions after a reset) is wiped, and the script would see seed 0 and seed it again.
+-- Only the unmodified game: the ROM's CRC32 must be retail Pokemon Emerald (USA, Europe), so a ROM
+-- hack is never touched, even one whose data sits where the original's does.
+local RETAIL_EMERALD_CRC = { [0x1F1C08FB] = true }
 local function fixEmeraldSeed(cur)
   if not fixSeed or V.custom or V.game ~= "EMERALD" then return false end
+  if rng.retail == nil then              -- worked out once a game (rng is reset on a reset)
+    rng.retail = false
+    local ok, sum = pcall(function() return emu:checksum(C.CHECKSUM.CRC32) end)
+    if ok and type(sum) == "string" and #sum == 4 then
+      local b1, b2, b3, b4 = sum:byte(1, 4)  -- the byte order isn't documented: try both
+      rng.retail = RETAIL_EMERALD_CRC[(b1 << 24) | (b2 << 16) | (b3 << 8) | b4] or
+                   RETAIL_EMERALD_CRC[(b4 << 24) | (b3 << 16) | (b2 << 8) | b1] or false
+    elseif ok and type(sum) == "number" then
+      rng.retail = RETAIL_EMERALD_CRC[sum & 0xFFFFFFFF] or false
+    end
+    if not rng.retail then
+      console:log("GB-Link Companion: not the unmodified Pokemon Emerald, so its starting seed is left alone.")
+    end
+  end
+  if not rng.retail then return false end
   local cb2 = r32(V.main + 4)
   if cb2 < 0x08000000 or cb2 >= 0x0A000000 then return false end   -- the game hasn't started yet
   if distance(0, cur) > 200000 then return false end   -- seeded already (or by a new game's timer)
@@ -1863,6 +1883,6 @@ afterCommands = function()
 end
 
 callbacks:add("frame", poll)
-callbacks:add("reset", function() added = 0; V, unsupported, helloSent = nil, nil, false; cache = { species = {}, ability = {}, nature = {}, mapsec = {} }; gridCache = {}; spriteCache = {}; mapIndex = nil; tileStats, metaColor, tilesetBytes, previewCache = {}, {}, {}, {}; bgCache, iconCache = {}, {}; rng.prev, rng.origin, rng.searching = nil, nil, nil; wcJob, wcResident, wcOrigVBlank = nil, nil, nil end)
+callbacks:add("reset", function() added = 0; V, unsupported, helloSent = nil, nil, false; cache = { species = {}, ability = {}, nature = {}, mapsec = {} }; gridCache = {}; spriteCache = {}; mapIndex = nil; tileStats, metaColor, tilesetBytes, previewCache = {}, {}, {}, {}; bgCache, iconCache = {}, {}; rng.prev, rng.origin, rng.searching, rng.retail = nil, nil, nil, nil; wcJob, wcResident, wcOrigVBlank = nil, nil, nil end)
 callbacks:add("start", function() added = 0 end)
 console:log("GB-Link Companion script loaded (port " .. PORT .. ")")
