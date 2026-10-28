@@ -196,7 +196,7 @@ func TestSaveCounterWrap(t *testing.T) {
 }
 
 func TestBankFamily(t *testing.T) {
-	for code, want := range map[string]string{"BPEE": "EMERALD", "BPRE": "FRLG", "BPGD": "FRLG", "BPEJ": "", "AXVE": "", "BPRF": "FRLG"} {
+	for code, want := range map[string]string{"BPEE": "EMERALD", "BPRE": "FRLG", "BPGD": "FRLG", "BPEJ": "EMERALD", "BPGJ": "FRLG", "AXVE": "", "BPRF": "FRLG"} {
 		if got := bankFamily(code); got != want {
 			t.Errorf("%s: %q", code, got)
 		}
@@ -413,13 +413,17 @@ func TestBankModes(t *testing.T) {
 	if b.Bank.count() != 0 || b.get(c(0, 2)) == nil || b.get(c(0, 4)) == nil {
 		t.Fatal("send to cartridge")
 	}
-	// choose, then click an empty slot: they go there
+	// choose, then click an empty slot: nothing moves (moving is always a drag)
 	b.ClearPicks()
 	b.Tap(c(0, 0))
 	b.Tap(c(0, 1))
 	b.Tap(k(0, 10))
+	if b.get(k(0, 10)) != nil || b.get(c(0, 0)) == nil || len(b.Multi) != 2 {
+		t.Fatal("a click on an empty slot moved them")
+	}
+	b.Drop(c(0, 0), k(0, 10))
 	if b.get(k(0, 10)) == nil || b.get(k(0, 11)) == nil || b.get(c(0, 0)) != nil {
-		t.Fatal("click an empty slot")
+		t.Fatal("dragging the chosen ones")
 	}
 	// no room on the cartridge from the last slot: nothing moves
 	b.SelectRefs([]slotRef{k(0, 10), k(0, 11)}, false)
@@ -523,5 +527,22 @@ func TestPlacesAndRibbons(t *testing.T) {
 	want := "Cool, Cool Super, Beauty, Beauty Super, Beauty Hyper, Beauty Master, Champion, World"
 	if got := strings.Join(p.RibbonNames(), ", "); got != want || p.RibbonCount() != 8 {
 		t.Fatalf("ribbons %q (%d)", got, p.RibbonCount())
+	}
+}
+
+func TestJapaneseGen3Save(t *testing.T) {
+	var boxes [g3BoxCount][g3BoxSlots][]byte
+	raw := makeSave(t, boxes, 5, 4)
+	s, err := parseGen3Save(raw, "BPEJ")
+	if err != nil || !s.Japanese || !s.looksJapanese() {
+		t.Fatal("a Japanese Emerald save", err)
+	}
+	if decodeGameText([]byte{0x01, 0x02, 0xFF}, true) == decodeGameText([]byte{0x01, 0x02, 0xFF}, false) {
+		t.Fatal("Japanese names should be read in the Japanese character set")
+	}
+	sb2 := s.Raw[s.sector[0]:]
+	sb2[6], sb2[7] = 0xFF, 0xFF // what the international games leave there
+	if s.looksJapanese() {
+		t.Fatal("an international save taken for a Japanese one")
 	}
 }

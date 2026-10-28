@@ -49,8 +49,11 @@ func startTestHooks(a *App) {
 					switch f[0] {
 					case "state":
 						s := a.ui.Snapshot()
-						b, _ := json.Marshal(s)
+						b, err := json.Marshal(s)
 						out = string(b)
+						if err != nil {
+							out = "error " + err.Error()
+						}
 					case "click": // a button by id
 						if w != nil {
 							w.do(func() { w.b(arg).Click() })
@@ -89,6 +92,60 @@ func startTestHooks(a *App) {
 						})
 					case "raise":
 						a.raise()
+					case "gbbank", "gbbankdrop": // the Game Boy bank: its state, or a drag ("c:0 b:3")
+						s := a.ui.Snapshot()
+						if s.GBBank == nil {
+							out = "no bank"
+							break
+						}
+						v := s.GBBank.view()
+						if f[0] == "gbbankdrop" {
+							refs := strings.Fields(arg)
+							ref := func(t string) slotRef {
+								k, n, _ := strings.Cut(t, ":")
+								i, _ := strconv.Atoi(n)
+								if k == "b" {
+									return slotRef{Bank: true, Box: v.BankBox, Slot: i}
+								}
+								return slotRef{Box: v.CartBox, Slot: i}
+							}
+							if len(refs) == 2 {
+								s.GBBank.Drop(ref(refs[0]), ref(refs[1]))
+								a.redraw()
+							}
+							break
+						}
+						sp := func(ms [gbMaxSlots]*GBMon) []int {
+							o := make([]int, gbMaxSlots)
+							for i, m := range ms {
+								if m != nil {
+									o[i] = m.Species()
+								}
+							}
+							return o
+						}
+						b, _ := json.Marshal(map[string]any{"Ready": v.Ready, "Loaded": v.CartLoaded, "Gen": v.Gen, "Game": v.GameName,
+							"Note": v.Note, "ToBank": v.Counts.ToBank, "ToCart": v.Counts.ToCart, "Changed": v.Counts.Any, "Saving": v.Saving,
+							"Cart": sp(v.Cart), "Bank": sp(v.BankSlots), "InBank": v.InBank})
+						out = string(b)
+					case "bankdrop": // a drag in the Pokémon Bank: "c:0 b:3" (side:slot of the boxes on show)
+						s := a.ui.Snapshot()
+						refs := strings.Fields(arg)
+						if s.Bank == nil || len(refs) != 2 {
+							out = "no bank"
+							break
+						}
+						v := s.Bank.view()
+						ref := func(t string) slotRef {
+							k, n, _ := strings.Cut(t, ":")
+							i, _ := strconv.Atoi(n)
+							if k == "b" {
+								return slotRef{Bank: true, Box: v.BankBox, Slot: i}
+							}
+							return slotRef{Box: v.CartBox, Slot: i}
+						}
+						s.Bank.Drop(ref(refs[0]), ref(refs[1]))
+						a.redraw()
 					case "bank": // the Pokémon Bank's boxes on show: species per slot (0 empty)
 						s := a.ui.Snapshot()
 						if s.Bank == nil {

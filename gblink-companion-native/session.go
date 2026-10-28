@@ -34,15 +34,18 @@ type Session struct {
 	cart       []byte     // what we know is on the cart (nil = unknown)
 	saveType   int
 	bridge     *Bridge
-	gbawc      *gbaWC        // Wonder Cards on a real GBA (wcgba.go)
-	bank       *BankSession  // the Pokémon Bank (bank.go)
-	cartWhat   string        // the cartridge to put in, when there's no game (ensureHelper)
-	stopped    atomic.Bool   // the window was closed before the game started: stop (closeWhileBusy)
-	cancel     chan struct{} // closed when the player cancels a backup
-	helperLg   byte          // the language the helper's text is in now (0: not known)
-	clockUsed  bool          // the .sav ends with the cartridge's clock for mGBA (cartclock.go)
-	lastBackup string        // hash of the last save backed up from mGBA
+	gbawc      *gbaWC                   // Wonder Cards on a real GBA (wcgba.go)
+	bank       *BankSession             // the Pokémon Bank (bank.go)
+	cartWhat   string                   // the cartridge to put in, when there's no game (ensureHelper)
+	stopped    atomic.Bool              // the window was closed before the game started: stop (closeWhileBusy)
+	cancel     chan struct{}            // closed when the player cancels a backup
+	helperLg   byte                     // the language the helper's text is in now (0: not known)
+	clockUsed  bool                     // the .sav ends with the cartridge's clock for mGBA (cartclock.go)
+	lastBackup string                   // hash of the last save backed up from mGBA
 	proc       atomic.Pointer[mgbaProc] // the mGBA that's running (closed when the app is: closeMGBA)
+	gbc        *gbClient                // a Game Boy cartridge through the GBA in Game Boy Color mode (gbsession.go)
+	gbRAM      int                      // ...the size of its save
+	gbbank     *GBBankSession           // the Game Boy Pokémon Bank (gbbank.go)
 }
 
 // helperLang: the language for the GBA's text: the Pokémon game's (lang.go), else English
@@ -446,7 +449,7 @@ func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 		return p, nil
 	}
 	set := s.app.settings()
-	if set.Controller {
+	if set.Controller && !s.game.GB { // a Game Boy game: the GBA is busy being a Game Boy Color
 		b, err := newBridge(s)
 		if err != nil {
 			s.ui.Log("GBA controller unavailable (%v).", err)

@@ -4,7 +4,7 @@
 PREFIX  ?= arm-none-eabi-
 CC      := $(PREFIX)gcc
 OBJCOPY := $(PREFIX)objcopy
-GBAFIX  ?= gbafix
+GBAFIX  ?= $(shell command -v gbafix || echo python3 ../tools/gbafix.py)
 CFLAGS  := -mcpu=arm7tdmi -mthumb -mthumb-interwork -O2 -Wall -Wextra -ffreestanding -fno-builtin -fno-strict-aliasing -std=gnu11
 LDFLAGS := -nostdlib -nostartfiles -T gba.ld -Wl,--no-warn-rwx-segments
 SRC     := main.c flash.c save.c sio_gba.c ui.c libc.c status.c

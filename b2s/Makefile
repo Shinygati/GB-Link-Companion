@@ -3,7 +3,7 @@
 #   make          build the GBA flasher and embed it in the web page (web/burn2slot_mb.js)
 #   make test     build the simulator and run the protocol/flash tests (needs node)
 #   make serve    serve the web page on http://localhost:8080 (WebUSB needs localhost or https)
-GBAFIX ?= gbafix
+GBAFIX ?= $(shell command -v gbafix || echo python3 $(CURDIR)/tools/gbafix.py)
 
 all: web/burn2slot_mb.js
 

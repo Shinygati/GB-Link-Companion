@@ -43,6 +43,7 @@ type ControllerView struct {
 
 type GameView struct {
 	ROM, Name, Title, Code string
+	GB                     bool // a Game Boy / Game Boy Color game
 	HasSave, Pending       bool
 	Played                 string
 	Verify                 string // No-Intro check: ok | bad | unknown | "" (not checked yet)
@@ -83,15 +84,17 @@ type State struct {
 	LibError   string
 	Toast      string
 	ToastUntil time.Time
-	WCGame     string      // the game's Wonder Card folder (wondercards.go), "" if it can't take them
-	GBAWC      string      // Wonder Cards on a real GBA (wcgba.go): starting, ready, busy, away
-	WCWhy      string      // ...and why not
-	WCHack     bool        // a ROM hack with a .sym: only the player's own cards (wcsym.go)
-	WCStatus   string      // what happened to the last card sent
-	WCChosen   []string    // the cards ticked in the list (remembered for the game)
-	WCReplace  *WonderCard // a card waiting for "Replace" (another one that keeps running is on)
-	Update     UpdateView  // a newer release on GitHub (version.go)
-	Bank       *BankSession `json:"-"` // the Pokémon Bank's boxes (bank.go): read and changed behind its own lock
+	WCGame     string         // the game's Wonder Card folder (wondercards.go), "" if it can't take them
+	GBAWC      string         // Wonder Cards on a real GBA (wcgba.go): starting, ready, busy, away
+	WCWhy      string         // ...and why not
+	WCHack     bool           // a ROM hack with a .sym: only the player's own cards (wcsym.go)
+	WCStatus   string         // what happened to the last card sent
+	WCChosen   []string       // the cards ticked in the list (remembered for the game)
+	WCReplace  *WonderCard    // a card waiting for "Replace" (another one that keeps running is on)
+	Update     UpdateView     // a newer release on GitHub (version.go)
+	Tool       string         // the cartridge tool running (carttools.go)
+	GBBank     *GBBankSession `json:"-"` // the Game Boy Pokémon Bank (gbbank.go)
+	Bank       *BankSession   `json:"-"` // the Pokémon Bank's boxes (bank.go): read and changed behind its own lock
 }
 
 // UI holds the state the window shows, and the answers to prompts.
@@ -296,9 +299,12 @@ type App struct {
 	mu      sync.Mutex
 	set     Settings
 	session *Session
-	win     *Window // the open window, nil if closed
+	win     *Window  // the open window, nil if closed
 	pop     *livePop // the GBA screen's own window, nil if not open (livescreen.go)
 	winMu   sync.Mutex
+	// homeAfter: the Home button was pressed while something was running; go back to the
+	// main menu as soon as it has stopped (homeButton)
+	homeAfter bool
 }
 
 func (a *App) settings() Settings { a.mu.Lock(); defer a.mu.Unlock(); return a.set }
@@ -319,7 +325,14 @@ func (a *App) setSettings(f func(*Settings)) {
 func (a *App) sessionEnded() {
 	a.mu.Lock()
 	a.session = nil
+	home := a.homeAfter
+	a.homeAfter = false
 	a.mu.Unlock()
+	if home { // the Home button was pressed: straight back to the main menu, unless something needs reading
+		if r := a.ui.Snapshot().Result; r == "done" || r == "cancelled" || r == "bank" || r == "gbawc" || r == "" {
+			go func() { time.Sleep(150 * time.Millisecond); a.goHome() }()
+		}
+	}
 	go a.refreshLibrary()
 	// the window was closed during the game: if all went well just quit, otherwise show why
 	a.winMu.Lock()
@@ -351,12 +364,15 @@ func gameView(rom string) (GameView, bool) {
 	if err != nil {
 		return GameView{}, false
 	}
-	v := GameView{ROM: g.ROM, Name: g.Name(), Title: g.Title, Code: g.Code}
+	v := GameView{ROM: g.ROM, Name: g.Name(), Title: g.Title, Code: g.Code, GB: g.GB}
 	if st, err := os.Stat(g.Sav); err == nil {
 		v.HasSave = true
 		v.Played = st.ModTime().Format("2 Jan 2006")
 	}
 	v.Pending = g.loadState().Pending
+	if g.GB {
+		return v, true // the No-Intro check is for GBA games
+	}
 	if h, ok := hashes.get(g.ROM); ok {
 		v.Verify, v.NoIntro = classify(h.SHA1, g.Code)
 	}
@@ -387,7 +403,7 @@ func (a *App) refreshLibrary() {
 				}
 				return nil
 			}
-			if strings.EqualFold(filepath.Ext(p), ".gba") {
+			if strings.EqualFold(filepath.Ext(p), ".gba") || isGBROM(p) {
 				roms = append(roms, p)
 			}
 			return nil
@@ -409,7 +425,7 @@ func (a *App) refreshLibrary() {
 	}
 	var todo []string
 	for _, g := range lib {
-		if g.Verify == "" {
+		if g.Verify == "" && !g.GB {
 			todo = append(todo, g.ROM)
 		}
 	}
@@ -457,12 +473,79 @@ func (a *App) play(rom string) error {
 		st.WCGame, st.WCWhy, st.WCStatus, st.WCHack = "", "", "", false
 		st.WCChosen = g.loadState().WCCards
 	})
+	if g.GB { // a Game Boy game: the GBA runs it in Game Boy Color mode (gbsession.go)
+		go s.runGB()
+		return nil
+	}
 	go func() { // can it take Wonder Cards? (a verified ROM: hashing it can take a moment)
 		key, why, hack := wcCheckROM(g)
 		a.ui.update(func(st *State) { st.WCGame, st.WCWhy, st.WCHack = key, why, hack })
 	}()
 	go s.run()
 	return nil
+}
+
+// homeButton is the Home button in the top bar: back to the main menu from anywhere. Something
+// still running is stopped the way its own Cancel or Done would stop it first: a game in mGBA is
+// closed (its save still goes to the cartridge), the Pokémon Bank asks about unsaved changes, and
+// a save being written to a cartridge is let finish.
+func (a *App) homeButton() {
+	a.mu.Lock()
+	s := a.session
+	a.mu.Unlock()
+	if s == nil {
+		a.goHome()
+		return
+	}
+	st := a.ui.Snapshot()
+	switch {
+	case s.bank != nil:
+		a.mu.Lock()
+		a.homeAfter = true
+		a.mu.Unlock()
+		a.bankSend("done")
+		return
+	case s.gbbank != nil:
+		a.mu.Lock()
+		a.homeAfter = true
+		a.mu.Unlock()
+		a.gbBankSend("done")
+		return
+	case st.Phase == "play" && s.proc.Load() != nil:
+		go func() {
+			if a.ui.Ask(Prompt{Kind: "question", Title: "Stop playing?",
+				Text:    "mGBA will close. Your latest save is copied to the cartridge first, then you're back at the main menu.",
+				Buttons: []Button{{ID: "stop", Label: "Close mGBA and go home", Style: "primary"}, {ID: "keep", Label: "Keep playing", Style: "secondary"}}}) != "stop" {
+				return
+			}
+			a.mu.Lock()
+			a.homeAfter = true
+			a.mu.Unlock()
+			if p := s.proc.Load(); p != nil {
+				p.close()
+			}
+		}()
+		return
+	case st.Phase == "finish" || st.Writing:
+		a.mu.Lock()
+		a.homeAfter = true
+		a.mu.Unlock()
+		a.ui.Toast("Finishing the save to the cartridge first…")
+		return
+	}
+	// connecting, loading, a backup, a tool: stop it
+	a.mu.Lock()
+	a.homeAfter = true
+	a.mu.Unlock()
+	s.stopped.Store(true)
+	if s.cancel != nil {
+		select {
+		case <-s.cancel:
+		default:
+			close(s.cancel)
+		}
+	}
+	a.ui.CancelPrompt()
 }
 
 func (a *App) goHome() {
@@ -493,7 +576,7 @@ func (a *App) browse(what string) {
 			path, err = pickFile("Find mGBA (mgba-qt or an mGBA AppImage)", "mGBA", "*", filepath.Dir(a.settings().MGBA))
 		}
 	default:
-		path, err = pickFile("Choose a GBA game", "GBA games (*.gba)", "*.gba", a.settings().GamesFolder)
+		path, err = pickFile("Choose a game", "Games (*.gba, *.gb, *.gbc)", "*.gba;*.gb;*.gbc", a.settings().GamesFolder)
 	}
 	if err != nil {
 		a.ui.Toast(err.Error())
@@ -512,7 +595,7 @@ func (a *App) browse(what string) {
 	default:
 		v, ok := gameView(path)
 		if !ok {
-			a.ui.Toast("That doesn't look like a GBA game")
+			a.ui.Toast("That doesn't look like a GBA or Game Boy game")
 			return
 		}
 		a.addRecent(v.ROM)

@@ -27,6 +27,7 @@ type BankSession struct {
 	s  *Session
 
 	Code, GameName string
+	file           string // a save file opened instead of a cartridge (a flash cart's SD card, an emulator)
 	Trainer        string
 	TID, SID       int
 	owner          string
@@ -126,9 +127,14 @@ func (b *BankSession) run() {
 			return
 		case c := <-b.cmd:
 			switch c {
-			case "load":
+			case "load", "file":
 				b.setLoading(true)
-				why := b.loadCart()
+				var why string
+				if c == "load" {
+					why = b.loadCart()
+				} else {
+					why = b.loadFile()
+				}
 				b.setLoading(false)
 				s.ui.SetStatus("", "")
 				s.ui.ClearProgress()
@@ -296,11 +302,7 @@ func (b *BankSession) loadCart() string {
 		}
 	}
 	if bankFamily(cart.Code) == "" {
-		why := fmt.Sprintf("The cartridge in the GBA is %s [%s]. The Pokémon Bank works with Pokémon Emerald, FireRed and LeafGreen.", nonBlank(cart.Title, "a game it can't use"), cart.Code)
-		if len(cart.Code) == 4 && cart.Code[3] == 'J' {
-			why = "The Pokémon Bank doesn't work with the Japanese games yet: their names use another character set."
-		}
-		return why
+		return fmt.Sprintf("The cartridge in the GBA is %s [%s]. The Pokémon Bank works with Pokémon Emerald, FireRed and LeafGreen.", nonBlank(cart.Title, "a game it can't use"), cart.Code)
 	}
 	if _, ok := saveTypes[cart.Type]; !ok {
 		return "No save chip was found on the cartridge."
@@ -326,6 +328,58 @@ func (b *BankSession) loadCart() string {
 	if err != nil {
 		return "Couldn't open the boxes: " + err.Error() + ". Nothing was changed."
 	}
+	b.file = ""
+	return b.openSave(save, cart.Code, rev, s.helper)
+}
+
+// loadFile opens a save file's boxes beside the bank: for flash carts that keep their saves on an
+// SD card (EZ-Flash, EverDrive and the like), or an emulator's save.
+func (b *BankSession) loadFile() string {
+	s := b.s
+	if !pickMu.TryLock() {
+		return ""
+	}
+	path, err := pickFile("Open a Pokémon Emerald, FireRed or LeafGreen save", "Save files (*.sav, *.srm)", "*.sav;*.srm", s.app.backupFolder())
+	pickMu.Unlock()
+	if err != nil || path == "" {
+		return "cancelled"
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "Couldn't read that file: " + err.Error()
+	}
+	code := ""
+	var save *Gen3Save
+	if sv, err := parseGen3Save(raw, "BPEE"); err == nil {
+		save, code = sv, "BPEE"
+	} else if sv, err2 := parseGen3Save(raw, "BPRE"); err2 == nil {
+		switch s.ui.Ask(Prompt{Kind: "question", Title: "FireRed or LeafGreen?",
+			Text:    "The save is from FireRed or LeafGreen (the save can't tell which). Which game is it?",
+			Buttons: []Button{{ID: "fr", Label: "FireRed", Style: "primary"}, {ID: "lg", Label: "LeafGreen", Style: "secondary"}, {ID: "cancel", Label: "Cancel", Style: "secondary"}}}) {
+		case "fr":
+			code = "BPRE"
+		case "lg":
+			code = "BPGE"
+		default:
+			return "cancelled"
+		}
+		save = sv
+	} else {
+		return "Couldn't open the boxes: it isn't an Emerald, FireRed or LeafGreen save (" + err.Error() + "). Nothing was changed."
+	}
+	if save.looksJapanese() { // a Japanese game's save: its names are read in the Japanese character set
+		code = code[:3] + "J"
+		save.Japanese = true
+	}
+	b.file = path
+	return b.openSave(save, code, 0, nil)
+}
+
+// openSave shows a save's boxes beside the bank (from the cartridge, or b.file).
+func (b *BankSession) openSave(save *Gen3Save, code string, rev int, helper *Helper) string {
+	s := b.s
+	cart := CartInfo{Code: code}
+	var err error
 	owner := save.Owner()
 	trainer, tid, sid := save.Trainer()
 	s.ui.Log("Save: %s, ID %05d, saved %d times.", trainer, tid, save.Counter)
@@ -363,7 +417,7 @@ func (b *BankSession) loadCart() string {
 	// names and pictures for this game
 	lib := s.ui.Snapshot().Library
 	s.linkMu.Lock()
-	data, icons := gatherBankData(lib, cart.Code, rev, s.helper, s.ui.Log, func(pages int) {
+	data, icons := gatherBankData(lib, cart.Code, rev, helper, s.ui.Log, func(pages int) {
 		s.ui.update(func(st *State) {
 			st.Progress = &Progress{Label: "Reading the Pokémon names and pictures from the cartridge", Done: pages, Total: max(pages+1, 22),
 				Detail: "Only the first time: they're kept on this PC."}
@@ -401,7 +455,11 @@ func (b *BankSession) loadCart() string {
 	b.Note = note
 	b.Rev++
 	b.mu.Unlock()
-	s.ui.update(func(v *State) { v.Game = &GameView{Name: "Pokémon Bank", Title: b.GameName, Code: cart.Code} })
+	title := b.GameName
+	if b.file != "" {
+		title += " · " + filepath.Base(b.file)
+	}
+	s.ui.update(func(v *State) { v.Game = &GameView{Name: "Pokémon Bank", Title: title, Code: cart.Code} })
 	return ""
 }
 
@@ -477,6 +535,9 @@ func (b *BankSession) commit() (end bool, why string) {
 		return false, ""
 	}
 	s.ui.SetPhase("finish")
+	if b.file != "" {
+		return b.commitFile(newSave, bank, cnt, finish)
+	}
 	s.ui.SetStatus("Saving to the cartridge...", "busy")
 
 	// the same cartridge, with the same save as when the boxes were opened
@@ -581,5 +642,49 @@ func (b *BankSession) commit() (end bool, why string) {
 		note += ". The cartridge was checked after writing."
 	}
 	finish(note)
+	return false, ""
+}
+
+// commitFile writes the changes to the save file that was opened: checked unchanged first, a copy
+// of it kept, then written and read back; the bank on this PC last.
+func (b *BankSession) commitFile(newSave []byte, bank Bank, cnt bankCounts, finish func(string)) (bool, string) {
+	s := b.s
+	now, err := os.ReadFile(b.file)
+	if err != nil || !bytes.Equal(now, b.save.Raw) {
+		clearJournal()
+		return true, "The save file changed since its boxes were opened (or it can't be read). Nothing was written, and the bank wasn't changed."
+	}
+	backup := b.file + ".before-bank-" + time.Now().Format("20060102-150405") + ".bak"
+	if os.WriteFile(backup, now, 0o644) != nil {
+		clearJournal()
+		finish("Couldn't save a copy of the save file first, so nothing was written.")
+		return false, ""
+	}
+	if err := writeFileSafely(b.file, newSave); err != nil {
+		return true, "The save file couldn't be written (" + err.Error() + "). No Pokémon are lost: open it in the bank again to finish the change."
+	}
+	if back, err := os.ReadFile(b.file); err != nil || !bytes.Equal(back, newSave) {
+		return true, "The save file didn't read back as written. No Pokémon are lost: open it in the bank again to finish the change. The file from before is " + backup + "."
+	}
+	s.ui.Log("Save file written: %s (the one from before: %s).", b.file, backup)
+	if err := saveBank(bank); err != nil {
+		return true, "The save file was written, but the bank on this PC couldn't be saved (" + err.Error() + "). No Pokémon are lost: open the file in the bank again and it finishes the change."
+	}
+	clearJournal()
+	ns, err := parseGen3Save(newSave, b.Code)
+	if err != nil {
+		return true, "Saved, but the new save couldn't be opened again: " + err.Error()
+	}
+	b.mu.Lock()
+	b.save = ns
+	b.orig = ns.Boxes()
+	b.Cart = copyBoxes(b.orig)
+	b.origBank, b.Bank = bank.clone(), bank
+	b.mu.Unlock()
+	note := fmt.Sprintf("Saved to the file: %d Pokémon went to the bank and %d to the game", cnt.ToBank, cnt.ToCart)
+	if cnt.Released > 0 {
+		note += fmt.Sprintf(", and %d were released", cnt.Released)
+	}
+	finish(note + ". Copy the file back to your flash cart's SD card.")
 	return false, ""
 }

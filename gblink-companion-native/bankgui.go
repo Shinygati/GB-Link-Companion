@@ -96,9 +96,9 @@ func (d *bankDrag) slotAt(p f32.Point) (slotRef, bool) {
 // bankClicks handles the bank's buttons (called from handleClicks).
 func (w *Window) bankClicks(gtx C) {
 	a := w.app
-	for _, id := range []string{"bank", "bank-again", "bank-top", "bank-home"} {
+	for _, id := range []string{"bank", "bank-again", "bank-gba"} {
 		if w.b(id).Clicked(gtx) {
-			w.settingsOpen, w.setPage = false, ""
+			w.settingsOpen, w.setPage, w.toolsPage = false, "", ""
 			go func() {
 				if err := a.openBank(); err != nil {
 					a.ui.Toast(err.Error())
@@ -119,7 +119,7 @@ func (w *Window) bankClicks(gtx C) {
 	if b == nil || w.st.Mode != "bank" {
 		return
 	}
-	for _, c := range []string{"save", "undo", "done", "release", "load"} {
+	for _, c := range []string{"save", "undo", "done", "release", "load", "file"} {
 		if w.b("bank-" + c).Clicked(gtx) {
 			go a.bankSend(c)
 		}
@@ -382,9 +382,9 @@ func (v *bankView) isPicked(r slotRef) bool {
 func (w *Window) bankBar(gtx C, v *bankView) D {
 	return w.card(gtx, func(gtx C) D {
 		hint := map[string]string{
-			modeMove: "Drag a Pokémon to another slot, or click it and then click where it goes. One already there swaps places.",
+			modeMove: "Drag a Pokémon to another slot. One already there swaps places. Click one to see its summary.",
 			modeMulti: "Drag a box over the slots to choose every Pokémon in it (hold Ctrl to add more), or click them one by one. " +
-				"Then drag one of the chosen ones, click an empty slot, or send them all at once.",
+				"Then drag one of the chosen ones to where they should go.",
 			modeRelease: "Click the Pokémon to release, or drag a box over them, then press Release. Once you save they're gone for good.",
 		}[v.Mode]
 		if !v.CartLoaded && v.Mode != modeRelease {
@@ -396,8 +396,6 @@ func (w *Window) bankBar(gtx C, v *bankView) D {
 			hint, tone = "Saving…", w.pal.text
 		case v.Note != "":
 			hint, tone = v.Note, w.pal.text
-		case v.Mode == modeMove && v.Held != nil:
-			hint, tone = "Now click the slot to put it in (click it again to put it back).", w.pal.accent
 		}
 		c := v.Counts
 		summary, stone := "No changes yet.", w.pal.muted
@@ -439,7 +437,7 @@ func (w *Window) bankBar(gtx C, v *bankView) D {
 			case modeMulti:
 				actions = append(actions,
 					layout.Rigid(func(gtx C) D { return w.label(gtx, 14, font.SemiBold, w.pal.accent, fmt.Sprintf("%d chosen", n)) }),
-					btn("bank-to-bank", "secondary", "Send to bank"), btn("bank-to-cart", "secondary", "Send to cartridge"), btn("bank-clear", "ghost", "Clear"))
+					btn("bank-clear", "ghost", "Clear"))
 			case modeRelease:
 				actions = append(actions,
 					layout.Rigid(func(gtx C) D { return w.label(gtx, 14, font.SemiBold, w.pal.bad, fmt.Sprintf("%d marked", n)) }),
@@ -566,14 +564,21 @@ func (w *Window) bankNoCart(gtx C, v *bankView) D {
 				layout.Rigid(gap(6)),
 				layout.Rigid(func(gtx C) D {
 					return w.centered(gtx, 13.5, font.Normal, w.pal.muted, "Look through the bank as it is, or load the boxes of your Pokémon Emerald, FireRed or LeafGreen "+
-						"cartridge over GB-Link to move Pokémon to and from it.")
+						"cartridge over GB-Link, or a save file (a flash cart's SD card or an emulator), to move Pokémon to and from it.")
 				}),
 				layout.Rigid(gap(16)),
 				layout.Rigid(func(gtx C) D {
 					if v.Loading {
 						return w.spinner(gtx, 24)
 					}
-					return w.button(gtx, w.b("bank-load"), "primary", "Load from cartridge", false, icDownload)
+					return layout.Flex{}.Layout(gtx,
+						layout.Rigid(func(gtx C) D {
+							return w.button(gtx, w.b("bank-load"), "primary", "Load from cartridge", false, icDownload)
+						}),
+						layout.Rigid(gap(10)),
+						layout.Rigid(func(gtx C) D {
+							return w.button(gtx, w.b("bank-file"), "secondary", "Open a save file…", false, icFolder)
+						}))
 				}))
 		})
 	})

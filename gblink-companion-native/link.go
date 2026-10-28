@@ -457,6 +457,10 @@ type Helper struct {
 	// Called with linkMu held; it may use h.Keys().
 	during func()
 	shot   gbaScreen // a copy of the GBA's status screen, for "Save screenshot" (gbascreen.go)
+	// the helper's version (CMD_HELLO); 1.1 and later know the streamed transfers (stream.go)
+	version uint32
+	// stop, if set, is asked during a streamed ROM dump whether to stop (Cancel)
+	stop func() bool
 }
 
 func (h *Helper) Configure() {
@@ -646,7 +650,10 @@ func (h *Helper) Alive(timeout time.Duration) bool {
 	if !h.waitIdle(timeout) {
 		return false
 	}
-	st, _, err := h.Command(cmdHello, nil, nil, 3*time.Second, []int{1}, timeout)
+	st, d, err := h.Command(cmdHello, nil, nil, 3*time.Second, []int{1}, timeout)
+	if err == nil && st == stOK && len(d) == 1 {
+		h.version = d[0]
+	}
 	return err == nil && st == stOK
 }
 
@@ -701,6 +708,20 @@ func printable(b []byte) string {
 // ReadSave reads the whole save; progress(done, total) is called as it goes.
 func (h *Helper) ReadSave(stype int, progress func(done, total int)) ([]byte, error) {
 	size := saveTypes[stype].Size
+	if h.Streams() { // Cart Doctor's streamed transfer: 64 KB a command
+		progress(0, size)
+		out := make([]byte, 0, size)
+		steps := (size + maxStreamSave - 1) / maxStreamSave
+		for k := 0; k < steps; k++ {
+			off := k * maxStreamSave
+			b, err := h.streamReadSave(stype, off, min(maxStreamSave, size-off), k, steps, func(d int) { progress(off+d, size) })
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, b...)
+		}
+		return out, nil
+	}
 	out := make([]byte, 0, size)
 	steps := (size + saveReadChunk - 1) / saveReadChunk
 	progress(0, size)
@@ -738,6 +759,28 @@ func (h *Helper) ReadSave(stype int, progress func(done, total int)) ([]byte, er
 // verifies it. Returns the number of blocks written.
 func (h *Helper) WriteSave(stype int, data, old []byte, progress func(done, total int)) (int, error) {
 	size := saveTypes[stype].Size
+	if h.Streams() { // Cart Doctor's streamed transfer: the changed blocks, joined, up to 64 KB a command
+		ranges := saveRanges(data, old, size)
+		total := 0
+		for _, r := range ranges {
+			total += r[1] - r[0]
+		}
+		if total > 0 {
+			progress(0, total)
+		}
+		done, blocks := 0, 0
+		for k, r := range ranges {
+			if err := h.streamWriteSave(stype, r[0], data[r[0]:r[1]], k, len(ranges), func(d int) { progress(done+d, total) }); err != nil {
+				return blocks, err
+			}
+			done += r[1] - r[0]
+			blocks += (r[1] - r[0] + saveChunk - 1) / saveChunk
+			if h.between != nil && k+1 < len(ranges) {
+				h.between()
+			}
+		}
+		return blocks, nil
+	}
 	var chunks []int
 	for off := 0; off < size; off += saveChunk {
 		e := min(off+saveChunk, size)

@@ -188,13 +188,15 @@ checks['moves, items and places read from the cartridge'] = b['Moves'] == 355 an
 checks['names and icons kept for next time'] = os.path.exists(os.path.join(home, 'Pokemon Bank', 'icons.bin')) and \
     os.path.exists(os.path.join(home, 'Pokemon Bank', 'names-BPEE.json'))
 
-# pick up Pikachu (slot 1), put it in the bank: nothing changes until Save
-cmd('click bank-slot:c:0'); time.sleep(0.3); shot('k3_picked_up')
-cmd('click bank-slot:b:0'); b = wait(lambda b: b['ToBank'] == 1, 5, 'moved', bank); shot('k4_moved')
+# clicking one slot and then another doesn't move anything: moving is always a drag
+cmd('click bank-slot:c:0'); time.sleep(0.3); shot('k3_clicked')
+cmd('click bank-slot:b:0'); time.sleep(0.5)
+checks['two clicks move nothing (drag only)'] = bank()['ToBank'] == 0
+# drag Pikachu (slot 1) to the bank: nothing changes until Save
+cmd('bankdrop c:0 b:0'); b = wait(lambda b: b['ToBank'] == 1, 5, 'moved', bank); shot('k4_moved')
 checks['moved to the bank (not saved yet)'] = b['Cart']['Species'][0] == 0 and b['Bank']['Species'][0] == 25 and bank_file() == []
 cmd('click bank-slot:c:2'); time.sleep(0.3); shot('k4b_details_shiny')
 checks['met place named as PKHeX does'] = bank()['SelPlace'] == 'Route 101'
-time.sleep(0.3); cmd('click bank-slot:c:2'); time.sleep(0.3)  # put it back down where it was
 cmd('click bank-save')
 b = wait(lambda b: b['Note'].startswith('Saved'), 120, 'saved', bank); shot('k5_saved')
 print('saved:', b['Note'])
@@ -214,7 +216,7 @@ checks['the save from before was backed up'] = len(backups) == 1 and 'before Pok
     boxes_of(open(os.path.join(bdir, backups[0]), 'rb').read())[1][:4] == [25, 1, 150, 0]
 
 # bring it back to slot 6 of box 1: the GBA is off, so it asks
-cmd('click bank-slot:b:0'); time.sleep(0.3); cmd('click bank-slot:c:5')
+cmd('bankdrop b:0 c:5')
 wait(lambda b: b['ToCart'] == 1, 5, 'moved back', bank)
 cmd('click bank-save')
 wait(lambda s: s['Prompt'] and s['Prompt']['Kind'] == 'power', 30, 'switch on to save'); shot('k6_switch_on_to_save')
@@ -230,9 +232,9 @@ checks['each save backed up the bank before it'] = len(os.listdir(os.path.join(h
 cmd('click bank-mode:multi'); time.sleep(0.3)
 cmd('click bank-slot:c:1'); time.sleep(0.3); cmd('click bank-slot:c:2'); time.sleep(0.3)
 b = wait(lambda b: b['Picked'] == 2, 5, 'two chosen', bank); shot('k9_multi_chosen')
-cmd('click bank-to-bank')
+cmd('bankdrop c:1 b:0')
 b = wait(lambda b: b['ToBank'] == 2, 5, 'sent two', bank); shot('k10_multi_sent')
-checks['Move Multi sends several to the bank'] = b['Bank']['Species'][:2] == [1, 150] and b['Cart']['Species'][1:3] == [0, 0] and b['Picked'] == 0
+checks['Move Multi drags several to the bank'] = b['Bank']['Species'][:2] == [1, 150] and b['Cart']['Species'][1:3] == [0, 0] and b['Picked'] == 0
 cmd('click bank-undo'); wait(lambda b: not b['Changed'], 5, 'undone', bank)
 
 # Release: mark one, release it (asks first)
@@ -278,7 +280,7 @@ cmd('click bank-undo'); wait(lambda b: not b['Changed'], 5, 'undone 4', bank)
 cmd('click bank-mode:move'); time.sleep(0.3)
 
 # a different cartridge before saving: refused, nothing written anywhere
-cmd('click bank-slot:c:1'); time.sleep(0.3); cmd('click bank-slot:b:3')
+cmd('bankdrop c:1 b:3')
 wait(lambda b: b['ToBank'] == 1, 5, 'moved 3', bank)
 other = make_save({(0, 0): pk3(0x33333333, 1, 7, 100)}, 1, 0, counter=50)
 open(cart, 'wb').write(other)

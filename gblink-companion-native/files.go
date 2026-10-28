@@ -179,6 +179,14 @@ func mgbaAppImages() []string {
 type Game struct {
 	ROM, Title, Code   string
 	Sav, State, Backup string
+	GB                 bool     // a Game Boy / Game Boy Color game (.gb, .gbc)
+	GBH                GBHeader // ...its header
+}
+
+// isGBROM: a Game Boy or Game Boy Color game's file name.
+func isGBROM(p string) bool {
+	e := strings.ToLower(filepath.Ext(p))
+	return e == ".gb" || e == ".gbc"
 }
 
 func NewGame(rom string) (*Game, error) {
@@ -188,6 +196,17 @@ func NewGame(rom string) (*Game, error) {
 		return nil, fmt.Errorf("Couldn't open %s", filepath.Base(rom))
 	}
 	defer f.Close()
+	if isGBROM(rom) {
+		h := make([]byte, 0x150)
+		if n, _ := f.Read(h); n < 0x150 {
+			return nil, fmt.Errorf("%s doesn't look like a Game Boy game", filepath.Base(rom))
+		}
+		gh := parseGBHeader(h[0x100:0x150])
+		base := strings.TrimSuffix(rom, filepath.Ext(rom))
+		return &Game{ROM: rom, Title: gh.Title, GB: true, GBH: gh,
+			Sav: base + ".sav", State: base + ".gblink.json",
+			Backup: filepath.Join(filepath.Dir(rom), "gblink_backups", filepath.Base(base))}, nil
+	}
 	h := make([]byte, 0xC0)
 	if n, _ := f.Read(h); n < 0xC0 {
 		return nil, fmt.Errorf("%s doesn't look like a GBA ROM", filepath.Base(rom))
@@ -209,6 +228,7 @@ type GameState struct {
 	Pending    bool   `json:"pending"`
 	SyncedHash string `json:"synced_hash"`
 	SaveType   int    `json:"save_type"`
+	GBSave     int    `json:"gb_save,omitempty"` // a Game Boy game: its cartridge save's size
 	MGBA       string `json:"mgba,omitempty"`
 	// the GBA's encounter counter for this game (status.go)
 	EncCount    int  `json:"encounters,omitempty"`

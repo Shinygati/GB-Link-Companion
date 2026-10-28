@@ -2,7 +2,9 @@
 
 > **Not affiliated with GB-Link.** GB-Link Companion is an independent, unofficial program. It is not made, endorsed or supported by the makers of the GB-Link adapter ([gblink.io](https://gblink.io)).
 
-Play your GBA games in **mGBA** with the **save from your real cartridge**, using a [GB-Link](https://gblink.io) adapter. Pick a game, press **Play**, and the app does the rest:
+*Created by Shinygati. Version 1.5.0.*
+
+Play your GBA, Game Boy and Game Boy Color games in **mGBA** with the **save from your real cartridge**, using a [GB-Link](https://gblink.io) adapter. Pick a game, press **Play**, and the app does the rest:
 
 1. **Loads your save** from the cartridge into mGBA.
 2. **Keeps the cartridge up to date** while you play: every time you save in-game, it's copied to the cartridge.
@@ -10,7 +12,11 @@ Play your GBA games in **mGBA** with the **save from your real cartridge**, usin
 
 While you play, the **GBA's buttons work as a controller** for mGBA, or, in Pokémon games, the GBA can show **live info from the game**: the RNG, the wild Pokémon (with catch and flee chances), the trainer's team, and the map.
 
-It can also **back up your cartridges**: it copies the game (ROM) and its save to your PC.
+It also has:
+
+- **Cartridge tools:** back up GBA, Game Boy and Game Boy Color cartridges (the game and its save), write a save back to a cartridge, and write a game to a GBA or Game Boy flash cart.
+- **Two Pokémon Banks:** one for Emerald, FireRed and LeafGreen, and a separate one for Red, Blue, Yellow, Gold, Silver and Crystal. Pokémon never move between the two.
+- **A Home button** at the top of the window that always takes you back to the games list.
 
 > ⚠️ **Status:** tested end to end against a simulated GB-Link, GBA and save chips, but **not yet on real hardware**. The app backs up your cartridge's save every time, but try it with a save you can afford to lose first.
 
@@ -22,9 +28,9 @@ No Python, web browser or anything else needed: it's a single `GBLinkCompanion.e
 
 - **Windows 10 or 11.**
 - **A GB-Link adapter** with current firmware, and a **Game Boy Color link cable**.
-- **A GBA or GBA SP**, with the game's cartridge in it.
+- **A GBA or GBA SP**, with the game's cartridge in it. For Game Boy and Game Boy Color games, the GBA is switched into Game Boy Color mode and the Game Boy cartridge goes in it.
 - **mGBA.** The app finds it in its usual install folders, or you can point it to `mGBA.exe`.
-- **Your game's ROM** (`.gba` file), the same game as the cartridge.
+- **Your game's ROM** (`.gba`, `.gb` or `.gbc` file), the same game as the cartridge.
 
 Supported cartridge saves: battery SRAM/FRAM, flash 64 KB and 128 KB, and EEPROM 512 B and 8 KB.
 
@@ -53,16 +59,49 @@ Supported cartridge saves: battery SRAM/FRAM, flash 64 KB and 128 KB, and EEPROM
 
 ---
 
-## Backing up a cartridge
+### Game Boy and Game Boy Color games
 
-Press **Back up a cartridge** on the game list.
+`.gb` and `.gbc` games are in the same list. Press **Play**, then:
+
+1. Switch the GBA on while holding START and SELECT, **with no cartridge in it**. The app sends it a program (from GB-Link Cart Doctor) that turns it into a Game Boy Color.
+2. When asked, **put the Game Boy cartridge in**. The app checks it's the same game as the ROM.
+3. The save is read from the cartridge and mGBA opens with it. Each save you make is written to the cartridge and read back to check it, and the last one goes back when you close mGBA.
+
+As a Game Boy Color, the GBA can't be a controller or a second screen: play with the PC's keyboard or a pad. If it's switched off, your saves wait on the PC.
+
+---
+
+## The Home button
+
+The **Home** button at the top of the window takes you back to the games list from anywhere: a backup or other cartridge tool (it stops it first), the Pokémon Bank (it asks about unsaved changes), Settings, or the end of a game. If a game is still running, it asks before closing mGBA, and your save still goes to the cartridge.
+
+---
+
+## Cartridge tools
+
+Press **Cartridge tools** on the game list. (These replace the old **Restore a save** and **Back up a cartridge** buttons.)
+
+| Tool | What it does |
+|---|---|
+| Back up a GBA cartridge | The game and its save, checked against No-Intro (see below). |
+| Write a save to a GBA cartridge | Replaces the cartridge's save with a `.sav` file; the cartridge's own save is copied to your PC first. |
+| Write a ROM to a GBA flash cart | Writes a `.gba` to a flash or repro cart and reads it back. The cart is found from FlashGBX's list of cart types, its CFI table, or the common chip commands. |
+| Back up a Game Boy cartridge | A Game Boy or Game Boy Color game and its save, checked against the header's checksums. |
+| Write a save to a Game Boy cartridge | Replaces the save with a `.sav` file and reads it back; the old save is copied first. |
+| Write a ROM to a Game Boy flash cart | Writes a `.gb`/`.gbc` to a Game Boy flash cart from FlashGBX's list and checks it. |
+
+GBA cartridges go through the GB-Link Companion helper, which now moves saves and games in GB-Link Cart Doctor's fast streamed way. Game Boy cartridges use GB-Link Cart Doctor's own programs, and flash carts its flash code.
+
+### Backing up a GBA cartridge
+
+Press **Cartridge tools › Back up a GBA cartridge**.
 
 1. Switch the GBA on while holding START and SELECT, with the cartridge in it.
 2. The app reads the cartridge's name, code and size, and shows where it'll save the backup.
    - It saves to your games folder, as for example `POKEMON EMER (BPEE).gba`.
    - Press **Save somewhere else…** to choose another place.
 3. Press **Back it up** and keep the GBA on until it's done.
-   - The progress bar shows how much is copied and roughly how long is left. Expect about 30 KB a second over the link cable: around 9 minutes for a 16 MB game, 18 minutes for 32 MB.
+   - The progress bar shows how much is copied and roughly how long is left. The game is streamed the way GB-Link Cart Doctor does it, and empty stretches of the cartridge are skipped over quickly.
    - **Cancel** stops it and deletes the partial file.
 
 The game's save is copied too, next to the game with the same name, so you can press **Play it now** straight away. The backed-up game is added to your list.
@@ -80,6 +119,24 @@ Good to know:
   If you chose **Back up all 32 MB** and the first part is a known dump, the backup is trimmed to it. The SHA-1 and CRC32 are shown with **Copy SHA-1** and **Search No-Intro…** buttons.
 - **Header check.** The backup is checked against the game header's checksum. If it doesn't match, you're told. That's normal for some repro carts and ROM hacks; on an official cart, re-seat it and back it up again.
 - **Your own cartridges only.** Only back up games you own.
+
+---
+
+## Pokémon Bank
+
+**Pokémon Bank** at the top of the window asks which bank to open. The two banks are kept apart: Pokémon move between the games of one bank, never from a Game Boy game to a GBA game or back.
+
+In both banks:
+- **Load from cartridge** reads the cartridge's boxes over GB-Link; **Open a save file…** opens a `.sav` (from a flash cart's SD card or an emulator) instead.
+- **Move** and **Move Multi** work only by **dragging**: drag a Pokémon onto a slot (one already there swaps places), or choose several in Move Multi and drag one of them to move them all. Clicking a Pokémon shows its summary.
+- **Release** is the only action done by clicking: mark Pokémon, then press Release.
+- Nothing is written until **Save**. The cartridge (or file) is backed up, written and read back to check it, and only then is the bank on your PC changed. If it stops part way, the next time works out where every Pokémon is.
+
+**GBA bank (Emerald, FireRed, LeafGreen):** `.pk3` files, one folder per box, in the bank's folder (Settings › Pokémon Enhancements).
+
+**Game Boy bank (Red, Blue, Yellow, Gold, Silver, Crystal):** `.pk1` and `.pk2` files in `Pokemon Bank GB`. The saves are read and written with code ported from **PKHeX**, so the box lists, checksums and the second copy of the save are kept right. Between Gold/Silver/Crystal and Red/Blue/Yellow it follows the Time Capsule's rules: only the first 151, no eggs, only generation 1 moves. A **flash cart showing its own menu**, like the **EZ-Flash Junior**, has its save read from its SRAM, where it keeps the last game's save. Every language works, each read with PKHeX's layout for it: the international games, the Japanese ones (boxes of 30) and Korean Gold and Silver. As in the games, Japanese, Korean and international Pokémon stay with games of their own kind (slots show **JP** or **KO**).
+
+**Both banks** work with every language: the GBA bank reads Japanese Emerald, FireRed and LeafGreen too (a Japanese save file is recognised by itself). Japanese and Korean names use your system's Japanese and Korean fonts (Yu Gothic/Meiryo and Malgun Gothic on Windows, Noto Sans CJK on Linux).
 
 ---
 
@@ -198,7 +255,7 @@ The version is shown beside the name at the top of the window. When the app star
 
 ## On Linux
 
-Run `GBLinkCompanion-1.2.0-x86_64.AppImage` (make it executable first: `chmod +x`, or tick "Allow
+Run `GBLinkCompanion-1.5.0-x86_64.AppImage` (make it executable first: `chmod +x`, or tick "Allow
 executing" in its properties). It works on any desktop Linux from about 2018 on (glibc 2.28 or newer).
 
 - **mGBA** is found by itself if it's installed from your distribution (`mgba-qt`), as an AppImage
@@ -223,7 +280,7 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H wi
 
 The Linux AppImage: `packaging/linux/build-appimage.sh` (what it needs is listed at its top).
 
-The GBA helper (`assets/gblink_companion_mb.gba`) and the mGBA script (`assets/gblink_controller.lua`) are built into the app. To change the helper, build it from `b2s/gba` with devkitARM or `arm-none-eabi-gcc` and `gbafix` on your PATH, then copy it into `assets/` before building the app:
+The GBA helper (`assets/gblink_companion_mb.gba`) and the mGBA script (`assets/gblink_controller.lua`) are built into the app. To change the helper, build it from `b2s/gba` with devkitARM or `arm-none-eabi-gcc` (and `gbafix`, or Python 3 for `../b2s/tools/gbafix.py`), then copy it into `assets/` before building the app:
 
 ```
 make -C ../b2s/gba
@@ -247,7 +304,14 @@ cp ../b2s/gba/gblink_companion_mb.gba assets/
 | `assets/gblink_controller.lua` | The mGBA script: the GBA's buttons into mGBA, and reading the Pokémon game for the status screens. Its addresses come from pret's symbol files ([pokeruby](https://github.com/pret/pokeruby), [pokeemerald](https://github.com/pret/pokeemerald), [pokefirered](https://github.com/pret/pokefirered), `symbols` branches) |
 | `test/status_test.py` | End-to-end test of the status screens: the real helper running in mGBA as the GBA (with screenshots of its screen), and the real script running in libmgba with a test cart (`test/status/`). See `test/status/README.md` |
 | `winres/` | The exe's icon and version info (`go run github.com/tc-hib/go-winres@v0.3.3 make`) |
-| `backup.go` | Backing up a cartridge: the game and its save |
+| `backup.go` | Backing up a GBA cartridge: the game and its save |
+| `stream.go` | The helper's fast streamed save and ROM transfers (GB-Link Cart Doctor's way) |
+| `carttools.go`, `toolsgui.go` | The Cartridge tools page and its tools; the Pokémon Bank's choice of bank |
+| `gbcart.go`, `gbsession.go` | Game Boy cartridges through GB-Link Cart Doctor's Game Boy Color mode and cartridge programs (`assets/cartdoctor/`); playing Game Boy games |
+| `flashprofiles.go`, `gbflash.go`, `gbaflash.go`, `gbacart.go` | Flash cart writing: FlashGBX's cart types (`assets/flashcarts/`), CFI, and GB-Link Cart Doctor's GBA cartridge program |
+| `bank*.go` | The GBA Pokémon Bank |
+| `gen12.go`, `gen12_text.go`, `gbbank.go`, `gbbankgui.go` | The Game Boy Pokémon Bank: Red/Blue/Yellow and Gold/Silver/Crystal saves (international, Japanese and Korean) and Pokémon, ported from PKHeX (`assets/gen12/`; the character tables in `gen12_text.go`) |
+| `test/bank_test.py`, `test/gbbank_test.py` | End-to-end tests of the two banks (drag and drop, saving to a cartridge or save file) |
 | `assets/gba.png` | The GBA picture shown when you're asked to switch it on |
 | `nointro.go`, `libverify.go` | No-Intro checks: the built-in list (`assets/nointro-gba.tsv.gz`), loading DAT files, and hashing the games in the list |
 | `test/library_test.py` | The game list's No-Intro check, and loading a DAT file |
@@ -259,6 +323,11 @@ cp ../b2s/gba/gblink_companion_mb.gba assets/
 
 ## Credits
 
+**GB-Link Companion was created by Shinygati.**
+
+- **GB-Link Cart Doctor** by the GB-Link team ([gb-cart-doctor-web](https://github.com/GB-Link/gb-cart-doctor-web), GPL-3.0): the Game Boy Color mode switch, the Game Boy cartridge program, the GBA cartridge dumper, the fast transfers and the flash cart code.
+- **PKHeX** by kwsch and contributors ([PKHeX](https://github.com/kwsch/PKHeX), GPL-3.0): the Game Boy Pokémon Bank's save handling, conversions and data.
+- **FlashGBX** by Lesserkuma ([FlashGBX](https://github.com/lesserkuma/FlashGBX), GPL-3.0): the flash cart types.
 - **Wonder Cards on your GBA:** the way into a running Emerald (start-up hand-off and interrupt hook) from [gen3-poke-multiplayer](https://github.com/Wired-Ariel/gen3-poke-multiplayer) by Wired-Ariel (GPL-3.0).
 - **Multiboot:** ported from [GB-Link Multiboot Web](https://github.com/GB-Link/gba-multiboot-web) (GPL-3.0).
 - **GBA helper:** the Burn2Slot for GB-Link flasher. Its save code follows [GB-Link Cart Doctor](https://github.com/GB-Link/gb-cart-doctor-web), and its ROM flashing comes from [Burn2Slot](https://github.com/vrodin/Burn2Slot).

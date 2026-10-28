@@ -25,6 +25,7 @@ func askClose(cmd *exec.Cmd) {
 // On Linux the file pickers are zenity (GNOME and most desktops) or kdialog (KDE), whichever is
 // installed; without either, the window offers recent games and the games folder.
 func pickFile(title, filterName, pattern, initialDir string) (string, error) {
+	pattern = strings.ReplaceAll(pattern, ";", " ") // "*.gba;*.gb" (as on Windows): zenity and kdialog want spaces
 	if initialDir == "" || initialDir == "." {
 		initialDir, _ = os.UserHomeDir()
 	}
@@ -35,6 +36,7 @@ func pickFile(title, filterName, pattern, initialDir string) (string, error) {
 
 // pickFiles lets the player choose one or more files. Returns nil if cancelled.
 func pickFiles(title, filterName, pattern, initialDir string) ([]string, error) {
+	pattern = strings.ReplaceAll(pattern, ";", " ")
 	if initialDir == "" || initialDir == "." {
 		initialDir, _ = os.UserHomeDir()
 	}

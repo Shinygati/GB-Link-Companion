@@ -112,8 +112,9 @@ func readBankData(read romReader, code string, names, info, abilities uint32, st
 	if err != nil {
 		return nil, err
 	}
+	jp := len(code) == 4 && code[3] == 'J'
 	for s := 0; s < speciesTbl; s++ {
-		d.Species = append(d.Species, decodeGameText(raw[s*stride:(s+1)*stride], false))
+		d.Species = append(d.Species, decodeGameText(raw[s*stride:(s+1)*stride], jp))
 	}
 	raw, err = read(info, 28*speciesTbl)
 	if err != nil {
@@ -131,7 +132,7 @@ func readBankData(read romReader, code string, names, info, abilities uint32, st
 		return nil, err
 	}
 	for a := 0; a < abilityMax; a++ {
-		d.Abilities = append(d.Abilities, decodeGameText(raw[a*aStride:(a+1)*aStride], false))
+		d.Abilities = append(d.Abilities, decodeGameText(raw[a*aStride:(a+1)*aStride], jp))
 	}
 	if len(d.Species) < 2 || d.Species[1] == "" || strings.Contains(d.Species[1], "?") {
 		return nil, fmt.Errorf("the species' names weren't where they should be")
@@ -237,7 +238,7 @@ func fromROMFile(path, code string) (*bankData, *bankIcons) {
 	read := fileReader(rom)
 	var d *bankData
 	romCode := string(rom[0xAC:0xB0])
-	if romCode == code && extra["japanese"] == 0 {
+	if romCode == code && (extra["japanese"] != 0) == (code[3] == 'J') {
 		stride, aStride := extra["speciesStride"], extra["abilityStride"]
 		if stride == 0 {
 			stride = 11
@@ -261,7 +262,7 @@ func fromROMFile(path, code string) (*bankData, *bankIcons) {
 // ROMs (unmodified dumps first), else from the cartridge (cart may be nil: not now).
 func gatherBankData(lib []GameView, code string, rev int, cart *Helper, log func(string, ...any), progress func(pages int)) (*bankData, *bankIcons) {
 	d, ic := loadCachedBankData(code), loadCachedIcons()
-	defer func() { d.mergePlaces() }()
+	defer func() { d.mergePlaces(); d.borrowNames() }()
 	if d != nil && ic != nil {
 		return d, ic
 	}
@@ -304,9 +305,13 @@ func gatherBankData(lib []GameView, code string, rev int, cart *Helper, log func
 	if d == nil {
 		if r, ok := romfind().Roms[key]; ok {
 			var err error
-			d, err = readBankData(read, code, r.S["SPECIES_NAMES"], r.S["SPECIES_INFO"], r.S["ABILITY_NAMES"], 11, 13)
+			stride, aStride := 11, 13
+			if code[3] == 'J' { // the Japanese games' shorter names
+				stride, aStride = 6, 7
+			}
+			d, err = readBankData(read, code, r.S["SPECIES_NAMES"], r.S["SPECIES_INFO"], r.S["ABILITY_NAMES"], stride, aStride)
 			if err == nil {
-				fillExtras(d, read, nil, code, rev, r.S["SPECIES_NAMES"], 11, nil)
+				fillExtras(d, read, nil, code, rev, r.S["SPECIES_NAMES"], stride, nil)
 				saveCachedBankData(d)
 				log("Pokémon names read from the cartridge.")
 			} else {
@@ -592,6 +597,34 @@ func fillExtras(d *bankData, read romReader, rom []byte, code string, rev int, s
 	if d.Places == nil {
 		if r, ok := romfind().Roms[key]; ok {
 			d.Places = findPlaces(read, r.S["GET_MAP_NAME"], emerald)
+		}
+	}
+}
+
+// borrowNames fills in the move, item and place names a game's data doesn't have (they aren't
+// read from the Japanese games) from another game read before: they're numbered the same in all.
+func (d *bankData) borrowNames() {
+	if d == nil || len(d.Moves) > 0 && len(d.Items) > 0 && len(d.Places) > 0 {
+		return
+	}
+	files, _ := filepath.Glob(filepath.Join(bankDir(), "names-*.json"))
+	for _, f := range files {
+		c := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "names-"), ".json")
+		if c == d.Code {
+			continue
+		}
+		o := loadCachedBankData(c)
+		if o == nil {
+			continue
+		}
+		if len(d.Moves) == 0 {
+			d.Moves = o.Moves
+		}
+		if len(d.Items) == 0 {
+			d.Items = o.Items
+		}
+		if len(d.Places) == 0 {
+			d.Places = o.Places
 		}
 	}
 }

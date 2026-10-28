@@ -32,10 +32,10 @@ var g3SectorSizes = map[string][g3Sectors]int{
 // where SaveBlock1 keeps the party (count, then the six 100-byte Pokémon)
 var g3PartyOffset = map[string]int{"EMERALD": 0x234, "FRLG": 0x34}
 
-// bankFamily: the games the Pokémon Bank works with, by their header code ("" for the rest).
-// The Japanese games are left out: their names use another character set.
+// bankFamily: the games the Pokémon Bank works with, by their header code ("" for the rest):
+// every language, Japanese too (its save is laid out the same; its names use another character set).
 func bankFamily(code string) string {
-	if len(code) != 4 || code[3] == 'J' {
+	if len(code) != 4 {
 		return ""
 	}
 	switch code[:3] {
@@ -48,11 +48,12 @@ func bankFamily(code string) string {
 }
 
 type Gen3Save struct {
-	Raw     []byte
-	Family  string
-	Slot    int            // 0 or 1: the slot in use
-	Counter uint32         // its save counter
-	sector  [g3Sectors]int // where each sector (by number) is in Raw
+	Raw      []byte
+	Family   string
+	Japanese bool           // a Japanese game's save: its names are in the Japanese character set
+	Slot     int            // 0 or 1: the slot in use
+	Counter  uint32         // its save counter
+	sector   [g3Sectors]int // where each sector (by number) is in Raw
 }
 
 func g3Checksum(b []byte) uint16 {
@@ -93,7 +94,7 @@ func parseGen3Save(raw []byte, code string) (*Gen3Save, error) {
 	if len(raw) < 2*g3SlotSize {
 		return nil, fmt.Errorf("the save is %d bytes, too small for %s", len(raw), map[string]string{"EMERALD": "Emerald", "FRLG": "FireRed or LeafGreen"}[fam])
 	}
-	s := &Gen3Save{Raw: append([]byte(nil), raw...), Family: fam}
+	s := &Gen3Save{Raw: append([]byte(nil), raw...), Family: fam, Japanese: code[3] == 'J'}
 	c0, w0, ok0 := s.readSlot(0)
 	c1, w1, ok1 := s.readSlot(1)
 	switch {
@@ -146,7 +147,7 @@ func (s *Gen3Save) BoxNames() [g3BoxCount]string {
 	var out [g3BoxCount]string
 	for b := 0; b < g3BoxCount; b++ {
 		off := g3StorageNames + b*g3BoxNameLen
-		out[b] = decodeGameText(st[off:off+g3BoxNameLen], false)
+		out[b] = decodeGameText(st[off:off+g3BoxNameLen], s.Japanese)
 		if out[b] == "" {
 			out[b] = fmt.Sprintf("BOX %d", b+1)
 		}
@@ -180,7 +181,14 @@ func (s *Gen3Save) Party() [][]byte {
 // Trainer: the player's name, Trainer ID and Secret ID (SaveBlock2).
 func (s *Gen3Save) Trainer() (name string, tid, sid int) {
 	sb2 := s.Raw[s.sector[0]:]
-	return decodeGameText(sb2[:7], false), int(binary.LittleEndian.Uint16(sb2[0x0A:])), int(binary.LittleEndian.Uint16(sb2[0x0C:]))
+	return decodeGameText(sb2[:7], s.Japanese), int(binary.LittleEndian.Uint16(sb2[0x0A:])), int(binary.LittleEndian.Uint16(sb2[0x0C:]))
+}
+
+// looksJapanese: PKHeX's test for a Japanese save: the trainer's name is 5 letters at most there,
+// and the game leaves the last two of its 8 bytes as zeros (the other games fill them with 0xFF).
+func (s *Gen3Save) looksJapanese() bool {
+	sb2 := s.Raw[s.sector[0]:]
+	return sb2[6] == 0 && sb2[7] == 0
 }
 
 // Owner: who this save belongs to, to tell one cartridge's save from another's.

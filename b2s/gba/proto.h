@@ -13,7 +13,7 @@
 #ifndef PROTO_H
 #define PROTO_H
 
-#define B2S_VERSION        0x00010000u            /* 1.0.0 */
+#define B2S_VERSION        0x00010100u            /* 1.1.0: the streamed transfers below */
 
 #define W_POLL             0x504F4C4Cu            /* "POLL" */
 #define W_IDLE             0x49444C45u            /* "IDLE" */
@@ -51,6 +51,44 @@
                                   read it. found 0: no answer. datetime: BCD year, month, day, weekday, hour,
                                   minute, second */
 #define CMD_STATUS         12  /* args [op, nwords, ...] + data[nwords] -> draw a status screen (ST_OP_*) */
+/* Streamed transfers, from GB-Link Cart Doctor's GBA cart dumper (gba_cart_dumper/main.c, MIT;
+ * based on FIX94's GBA Link Cable Dumper). Data moves as a plain stream of words with no
+ * acknowledgement per word, in 256-byte sections that each end with an XOR check:
+ *   CMD_SAVE_DUMP   args [saveType, offset, nbytes, step, steps]: the GBA reads the save into its
+ *                   RAM, repeats G_DONE until the host answers S_CONT, then sends the sections
+ *                   (64 words + XOR; the host answers S_CONT, S_FAIL to have it again, or
+ *                   S_ABORT). Then it's idle again: no RESULT.
+ *   CMD_SAVE_PUT    args [saveType, offset, nbytes, step, steps]: the GBA repeats G_READY until
+ *                   the host answers S_GO, receives the sections (64 words + XOR; then the host
+ *                   sends S_CONT and gets G_OKOK, or G_FAIL to send it again), writes them to the
+ *                   save chip and checks them, and answers with the normal RESULT.
+ *   CMD_ROM_STREAM  args [nbytes]: G_DONE gate, then the ROM as records sent without waiting:
+ *                   R_DATA|section + 64 words + check, R_FILL|section + value + count + check (a
+ *                   run of sections that are one repeated word), R_END|sections. The host keeps
+ *                   sending S_SPOLL; S_SEEK|section restarts from a section, S_FIN ends it.
+ * nbytes is a multiple of 256 (flash saves: whole 4 KB sectors), at most 64 KB a command for saves.
+ * An argument the GBA can't use gets the normal RESULT with an error instead. */
+#define CMD_SAVE_DUMP      14
+#define CMD_SAVE_PUT       15
+#define CMD_ROM_STREAM     16
+#define S_GO               0x4742600Du
+#define S_CONT             0x4742C047u
+#define S_FAIL             0x4742BAD0u
+#define S_ABORT            0x4742AB0Bu
+#define S_SPOLL            0x47425EEDu
+#define S_FIN              0x4742F1A1u
+#define S_SEEK             0x53000000u
+#define G_READY            0x52454459u            /* "REDY" */
+#define G_DONE             0x444F4E45u            /* "DONE" */
+#define G_OKOK             0x4F4B4F4Bu            /* "OKOK" */
+#define G_FAIL             0x4641494Cu            /* "FAIL" */
+#define G_SYNC             0x53594E43u            /* "SYNC" */
+#define R_DATA             0xDA000000u
+#define R_FILL             0xF1000000u
+#define R_END              0xE0000000u
+#define STREAM_SECTION     0x100u
+#define MAX_STREAM_SAVE    0x10000u              /* a 128 KB save is two of them */
+
 #define MAX_SAVE_CHUNK     4096u
 #define MAX_SAVE_READ_CHUNK 0x4000u   /* reads: 16 KB a command. A chunk that's all one word (blank)
                                        * comes back as [checksum, word]; so does a ROM chunk.     */

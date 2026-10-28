@@ -116,10 +116,63 @@ func loadFonts() ([]font.FontFace, font.Typeface) {
 			faces = append(faces, font.FontFace{Font: font.Font{Typeface: font.Typeface(d[1]), Weight: w}, Face: f})
 		}
 		if len(faces) > 0 {
-			return append(faces, coll...), font.Typeface(d[1])
+			return append(append(faces, coll...), cjkFonts()...), font.Typeface(d[1])
 		}
 	}
-	return coll, "Go"
+	return append(coll, cjkFonts()...), "Go"
+}
+
+// cjkFonts: the system's Japanese and Korean fonts, for the letters the main font doesn't have
+// (the names of Pokémon from Japanese and Korean games). Text falls back to them by itself.
+func cjkFonts() []font.FontFace {
+	var cands []string
+	if runtime.GOOS == "windows" {
+		f := filepath.Join(os.Getenv("WINDIR"), "Fonts")
+		cands = []string{filepath.Join(f, "YuGothM.ttc"), filepath.Join(f, "YuGothR.ttc"), filepath.Join(f, "meiryo.ttc"), filepath.Join(f, "msgothic.ttc"),
+			filepath.Join(f, "malgun.ttf"), filepath.Join(f, "gulim.ttc")}
+	} else {
+		for _, d := range []string{"/usr/share/fonts/opentype/noto", "/usr/share/fonts/noto-cjk", "/usr/share/fonts/google-noto-cjk",
+			"/usr/share/fonts/opentype/noto-cjk", "/usr/share/fonts/noto"} {
+			cands = append(cands, filepath.Join(d, "NotoSansCJK-Regular.ttc"), filepath.Join(d, "NotoSansCJKjp-Regular.otf"))
+		}
+		cands = append(cands, "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", "/usr/share/fonts/google-droid/DroidSansFallbackFull.ttf")
+	}
+	var out []font.FontFace
+	jp, kr := false, false
+	for _, c := range cands {
+		korean := strings.Contains(strings.ToLower(c), "malgun") || strings.Contains(strings.ToLower(c), "gulim")
+		if korean && kr || !korean && jp {
+			continue
+		}
+		b, err := os.ReadFile(c)
+		if err != nil {
+			continue
+		}
+		var faces []font.FontFace
+		if strings.HasSuffix(strings.ToLower(c), ".ttc") {
+			faces, err = opentype.ParseCollection(b)
+		} else {
+			var f font.Face
+			if f, err = opentype.Parse(b); err == nil {
+				faces = []font.FontFace{{Face: f}}
+			}
+		}
+		if err != nil || len(faces) == 0 {
+			continue
+		}
+		f := faces[0] // one is enough: each has the kana (and the Noto and Droid ones the Hangul too)
+		f.Font = font.Font{Typeface: "CJK fallback"}
+		out = append(out, f)
+		if korean {
+			kr = true
+		} else {
+			jp = true
+			if runtime.GOOS != "windows" {
+				kr = true
+			}
+		}
+	}
+	return out
 }
 
 func systemDark() bool {
@@ -155,6 +208,8 @@ var (
 	icDownload = mustIcon(icons.FileFileDownload)
 	icUpload   = mustIcon(icons.FileFileUpload)
 	icCopy     = mustIcon(icons.ContentContentCopy)
+	icHome     = mustIcon(icons.ActionHome)
+	icTools    = mustIcon(icons.ActionBuild)
 )
 
 // ------------------------------------------------------------------------------ the window
@@ -201,6 +256,8 @@ type Window struct {
 	pageW               unit.Dp       // the width of the page's column
 	setList             widget.List   // Settings, when it doesn't fit
 	detailsOpen         bool
+	toolsPage, toolsSub string      // the Cartridge tools page is open ("tools"); toolsSub: unused for now
+	gbDrag              bankDrag    // the Game Boy bank's pointer (gbbankgui.go)
 	pending             chan func() // work to run on the window's own goroutine (tests)
 }
 
@@ -568,14 +625,14 @@ func (w *Window) frame(gtx C) {
 	w.handleClicks(gtx, setup)
 	// the Pokémon Bank's boxes can use the whole width of the window
 	w.pageW = 860
-	if st.Mode == "bank" && (st.Phase == "play" || st.Phase == "finish") {
+	if (st.Mode == "bank" || st.Mode == "gbbank") && (st.Phase == "play" || st.Phase == "finish") {
 		w.pageW = 1500
 	}
 
 	if home && !setup {
 		w.filterGames()
 	}
-	showBar := home && !setup && w.selectedGame() != nil
+	showBar := home && !setup && w.toolsPage == "" && w.selectedGame() != nil
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(w.topbar),
 		layout.Rigid(w.disclaimer),
@@ -583,6 +640,8 @@ func (w *Window) frame(gtx C) {
 			switch {
 			case setup:
 				return w.pageOf(gtx, w.setupView())
+			case home && w.toolsPage != "":
+				return w.pageOf(gtx, w.toolsView())
 			case home:
 				return w.homeView(gtx)
 			default:
@@ -657,6 +716,8 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 		go a.checkUpdates(true)
 	}
 	w.wcClicks(gtx)
+	w.gbBankClicks(gtx)
+	w.toolsClicks(gtx)
 	w.bankClicks(gtx)
 	for _, what := range []string{"rom", "folder", "mgba"} {
 		for _, where := range []string{"", "-2", "-set"} {
@@ -678,19 +739,11 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 	if w.b("home").Clicked(gtx) {
 		a.goHome()
 	}
-	if w.b("backup").Clicked(gtx) || w.b("backup-2").Clicked(gtx) || w.b("backup-again").Clicked(gtx) {
-		go func() {
-			if err := a.backup(); err != nil {
-				a.ui.Toast(err.Error())
-			}
-		}()
-	}
-	if w.b("restore").Clicked(gtx) || w.b("restore-again").Clicked(gtx) {
-		go func() {
-			if err := a.restoreSave(); err != nil {
-				a.ui.Toast(err.Error())
-			}
-		}()
+	if w.b("home-top").Clicked(gtx) { // the top bar's Home: close whatever is open, then the main menu
+		w.settingsOpen, w.setPage, w.wcOpen, w.detailsOpen, w.liveOn = false, "", false, false, false
+		w.toolsPage, w.toolsSub = "", ""
+		w.page.Position, w.setList.Position = layout.Position{}, layout.Position{}
+		go a.homeButton()
 	}
 	if w.b("gbawc").Clicked(gtx) || w.b("gbawc-again").Clicked(gtx) {
 		w.settingsOpen, w.setPage = false, ""
@@ -932,7 +985,14 @@ func (w *Window) topbar(gtx C) D {
 						return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
 							layout.Rigid(func(gtx C) D { return w.label(gtx, 16, font.SemiBold, w.pal.text, "GB-Link Companion") }),
 							layout.Rigid(gap(6)),
-							layout.Rigid(func(gtx C) D { return w.label(gtx, 12.5, font.Normal, w.pal.muted, "v"+appVersion) }))
+							layout.Rigid(func(gtx C) D { return w.label(gtx, 12.5, font.Normal, w.pal.muted, "v"+appVersion) }),
+							layout.Rigid(gap(6)),
+							layout.Rigid(func(gtx C) D {
+								if gtx.Constraints.Max.X < gtx.Dp(200) {
+									return D{}
+								}
+								return w.label(gtx, 12.5, font.Normal, w.pal.muted, "· by Shinygati")
+							}))
 					}),
 					layout.Rigid(func(gtx C) D {
 						if gtx.Constraints.Max.X < gtx.Dp(260) {
@@ -940,6 +1000,15 @@ func (w *Window) topbar(gtx C) D {
 						}
 						return w.labelMax(gtx, 12.5, font.Normal, w.pal.muted, "Play in mGBA with the save on your real cartridge", 1)
 					}))
+			}),
+			layout.Rigid(func(gtx C) D { // Home: back to the main menu from any screen
+				return layout.Inset{Right: 10}.Layout(gtx, func(gtx C) D {
+					style := "secondary"
+					if st.Phase == "home" && !w.settingsOpen && !w.wcOpen && w.toolsPage == "" {
+						style = "ghost"
+					}
+					return w.button(gtx, w.b("home-top"), style, "Home", false, icHome)
+				})
 			}),
 			layout.Rigid(func(gtx C) D { // the Pokémon Bank, where everyone sees it
 				if st.Phase != "home" || gtx.Constraints.Max.X < gtx.Dp(480) {
@@ -1015,7 +1084,7 @@ func (w *Window) disclaimer(gtx C) D {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	dims := layout.Inset{Top: 6, Bottom: 6, Left: 24, Right: 24}.Layout(gtx, func(gtx C) D {
 		return w.centered(gtx, 12, font.Normal, w.pal.muted,
-			"GB-Link Companion is an independent, unofficial program and is not associated with gblink.io.")
+			"GB-Link Companion was created by Shinygati. It's an independent, unofficial program and is not associated with gblink.io.")
 	})
 	call := m.Stop()
 	fill(gtx, dims.Size, 0, w.pal.surface2)
@@ -1257,11 +1326,7 @@ func (w *Window) homeHead(gtx C) D {
 				}),
 				layout.Rigid(gap(4)),
 				layout.Rigid(func(gtx C) D {
-					return w.button(gtx, w.b("restore"), "ghost", "Restore a save", false, icUpload)
-				}),
-				layout.Rigid(gap(4)),
-				layout.Rigid(func(gtx C) D {
-					return w.button(gtx, w.b("backup"), "ghost", "Back up a cartridge", false, icDownload)
+					return w.button(gtx, w.b("tools-open"), "ghost", "Cartridge tools", false, icTools)
 				}))
 		}),
 		layout.Rigid(gap(14)),
@@ -1358,7 +1423,7 @@ func (w *Window) emptyLibrary(gtx C) D {
 			layout.Rigid(gap(8)),
 			layout.Rigid(func(gtx C) D { return w.centered(gtx, 17, font.SemiBold, w.pal.text, "No games here yet") }),
 			layout.Rigid(func(gtx C) D {
-				return w.centered(gtx, 14.5, font.Normal, w.pal.muted, "Choose the folder with your .gba files, browse for one game, or back up a cartridge you own.")
+				return w.centered(gtx, 14.5, font.Normal, w.pal.muted, "Choose the folder with your .gba, .gb and .gbc files, browse for one game, or back up a cartridge you own (Cartridge tools).")
 			}),
 			layout.Rigid(gap(14)),
 			layout.Rigid(func(gtx C) D {
@@ -1372,7 +1437,7 @@ func (w *Window) emptyLibrary(gtx C) D {
 					}),
 					layout.Rigid(gap(10)),
 					layout.Rigid(func(gtx C) D {
-						return w.button(gtx, w.b("backup-2"), "secondary", "Back up a cartridge", false, icDownload)
+						return w.button(gtx, w.b("tools-open-2"), "secondary", "Cartridge tools", false, icTools)
 					}))
 			}))
 	})
@@ -1427,7 +1492,7 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 	if phase == "connect" {
 		phase = "load"
 	}
-	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup" || st.Result == "restore" || st.Result == "gbawc" || st.Result == "bank")
+	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup" || st.Result == "savebackup" || st.Result == "restore" || st.Result == "gbawc" || st.Result == "bank" || st.Result == "flash")
 	eyebrow := map[string]string{"load": "Getting ready", "play": "Now playing", "finish": "Saving to the cartridge"}[phase]
 	if st.Mode == "backup" {
 		eyebrow = map[string]string{"load": "Backing up a cartridge", "dump": "Backing up"}[phase]
@@ -1435,11 +1500,20 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 	if st.Mode == "restore" {
 		eyebrow = map[string]string{"load": "Restoring a save", "dump": "Restoring a save"}[phase]
 	}
+	if st.Mode == "savebackup" {
+		eyebrow = "Backing up a save"
+	}
 	if st.Mode == "gbawc" {
 		eyebrow = "Wonder Cards on your GBA"
 	}
 	if st.Mode == "bank" {
 		eyebrow = map[string]string{"load": "Opening the boxes", "play": "Pokémon Bank", "finish": "Saving to the cartridge"}[phase]
+	}
+	if st.Mode == "gbbank" {
+		eyebrow = map[string]string{"load": "Opening the boxes", "play": "Game Boy Pokémon Bank", "finish": "Saving"}[phase]
+	}
+	if st.Mode == "flash" {
+		eyebrow = map[string]string{"load": "Writing a flash cart", "dump": "Writing a flash cart"}[phase]
 	}
 	if phase == "done" {
 		eyebrow = map[bool]string{true: "Finished", false: "Stopped"}[doneAll]
@@ -1465,10 +1539,10 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 			return layout.Inset{Top: 22}.Layout(gtx, func(gtx C) D { return w.stepper(gtx, st.Mode, phase, doneAll) })
 		},
 	}
-	if st.Mode == "bank" && (st.Phase == "play" || st.Phase == "finish") {
+	if (st.Mode == "bank" || st.Mode == "gbbank") && (st.Phase == "play" || st.Phase == "finish") {
 		// the Pokémon Bank's boxes need the room: no header and steps while they're open
 		blocks = blocks[:0]
-		loading := st.Bank != nil && st.Bank.view().Loading
+		loading := (st.Mode == "bank" && st.Bank != nil && st.Bank.view().Loading) || (st.Mode == "gbbank" && st.GBBank != nil && st.GBBank.view().Loading)
 		if (st.Phase == "finish" || loading) && st.Prompt == nil && st.Progress == nil && st.Status != "" {
 			blocks = append(blocks, func(gtx C) D { return layout.Inset{Bottom: 14}.Layout(gtx, w.statusCard) })
 		}
@@ -1481,6 +1555,9 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 			blocks = append(blocks, func(gtx C) D {
 				return layout.Inset{Bottom: 14}.Layout(gtx, func(gtx C) D { return w.progressCard(gtx, pr) })
 			})
+		}
+		if st.Mode == "gbbank" {
+			return append(blocks, w.gbBankEditor, w.details)
 		}
 		return append(blocks, w.bankEditor, w.details)
 	}
@@ -1515,6 +1592,9 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 		})
 	} else if st.Phase == "play" {
 		blocks = append(blocks, w.tiles)
+		if st.Game != nil && st.Game.GB {
+			blocks = append(blocks, w.gbPlayNote)
+		}
 		if st.Game != nil && (wcGame(st.Game.Code) || st.WCHack) && !st.Settings.WonderCardsOff {
 			blocks = append(blocks, w.wcCard)
 		}
@@ -1564,7 +1644,15 @@ func (w *Window) stepper(gtx C, mode, phase string, doneAll bool) D {
 		steps = []string{"Check the cartridge", "Write the save", "Checked and done"}
 		cur = map[string]int{"load": 0, "dump": 1}[phase]
 	}
-	if mode == "bank" {
+	if mode == "savebackup" {
+		steps = []string{"Read the cartridge", "Copy the save", "Saved on this PC"}
+		cur = map[string]int{"load": 0, "dump": 1}[phase]
+	}
+	if mode == "flash" {
+		steps = []string{"Find the flash chip", "Write the game", "Checked and done"}
+		cur = map[string]int{"load": 0, "dump": 1}[phase]
+	}
+	if mode == "bank" || mode == "gbbank" {
 		steps = []string{"Read the cartridge", "Move your Pokémon", "Save to the cartridge"}
 		cur = map[string]int{"load": 0, "play": 1, "finish": 2}[phase]
 	}
@@ -1904,6 +1992,8 @@ func (w *Window) doneCard(gtx C) D {
 		ibg, ifg, ic, title = w.pal.warnSoft, w.pal.warn, icWarn, "Your save is on this PC"
 	case "backup":
 		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Backed up!"
+	case "savebackup":
+		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Save backed up!"
 	case "restore":
 		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Save written!"
 	case "failed":
@@ -1914,15 +2004,21 @@ func (w *Window) doneCard(gtx C) D {
 			title = "The Pokémon Bank stopped"
 		} else if st.Mode == "restore" {
 			title = "The save wasn't written"
+		} else if st.Mode == "flash" {
+			title = "The flash cart wasn't written"
+		} else if st.Mode == "gbbank" {
+			title = "The Game Boy Pokémon Bank stopped"
 		}
 	case "gbawc", "bank":
 		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Done"
+	case "flash":
+		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Flash cart written!"
 	}
 	type btn struct{ id, style, label string }
 	buttons := []btn{{"again", "primary", "Play again"}, {"home", "secondary", "Choose another game"}}
 	switch {
 	case r == "backup":
-		buttons = []btn{{"play-backup", "primary", "Play it now"}, {"show-backup", "secondary", "Show the file"}, {"home", "secondary", "Back to games"}}
+		buttons = []btn{{"play-backup", "primary", "Play it now"}, {"show-backup", "secondary", "Show the file"}}
 	case st.Mode == "backup":
 		buttons = []btn{{"backup-again", "primary", "Try again"}, {"home", "secondary", "Back to games"}}
 	case st.Mode == "restore":
@@ -1931,6 +2027,16 @@ func (w *Window) doneCard(gtx C) D {
 		buttons = []btn{{"gbawc-again", "primary", "Start again"}, {"home", "secondary", "Back to games"}}
 	case st.Mode == "bank":
 		buttons = []btn{{"bank-again", "primary", "Open the Pokémon Bank again"}, {"home", "secondary", "Back to games"}}
+	case st.Mode == "gbbank":
+		buttons = []btn{{"gbbank-again", "primary", "Open the Game Boy bank again"}, {"home", "secondary", "Back to games"}}
+	}
+	tool := st.Tool != "" && (st.Mode == "backup" || st.Mode == "restore" || st.Mode == "flash" || st.Mode == "savebackup")
+	if r == "savebackup" {
+		buttons = []btn{{"show-backup", "primary", "Show the file"}, {"tool-again", "secondary", "Back up another"}, {"tools-back-done", "secondary", "Back to the tools"}}
+	} else if tool && r != "backup" { // a cartridge tool: again, or back to the tools
+		buttons = []btn{{"tool-again", "primary", "Do it again"}, {"tools-back-done", "secondary", "Back to the tools"}, {"home", "secondary", "Back to games"}}
+	} else if tool {
+		buttons = append(buttons, btn{"tools-back-done", "secondary", "Back to the tools"})
 	}
 	if txt == "" && r == "cancelled" {
 		txt = "Nothing was changed on the cartridge."
@@ -2214,6 +2320,10 @@ func (w *Window) settingsDialog(gtx C) {
 							"with their box icons like PKHeX. When you save, the cartridge is written and checked first, then the bank.", "",
 							func(gtx C) D { return w.button(gtx, w.b("bank"), "secondary", "Open…", false, icGamepad) }),
 						div,
+						row("Game Boy Pokémon Bank", "Red, Blue, Yellow, Gold, Silver and Crystal, kept apart from the GBA bank: from a cartridge over GB-Link or a save file. "+
+							"Pokémon move between all six games; the bank keeps them as PKHeX .pk1 and .pk2 files.", "",
+							func(gtx C) D { return w.button(gtx, w.b("gbbank"), "secondary", "Open…", false, icGamepad) }),
+						div,
 						row("The bank's files", "A folder for each box, with a .pk3 file for each Pokémon that PKHeX can open (and .pk3 files from PKHeX can be put in). "+
 							"Every save keeps a dated copy of the whole bank in Backups (the last 30).", "",
 							func(gtx C) D {
@@ -2302,7 +2412,13 @@ func (w *Window) settingsDialog(gtx C) {
 					}),
 					layout.Rigid(func(gtx C) D {
 						return layout.Inset{Top: 8}.Layout(gtx, func(gtx C) D {
-							return layout.E.Layout(gtx, func(gtx C) D { return w.button(gtx, w.b("settings-done"), "primary", "Done", false, nil) })
+							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+								layout.Flexed(1, func(gtx C) D {
+									return w.labelMax(gtx, 12, font.Normal, w.pal.muted, "GB-Link Companion v"+appVersion+", created by Shinygati. "+
+										"Thanks to the GB-Link team, vrodin (Burn2Slot), GB-Link Cart Doctor, Lesserkuma (FlashGBX) and kwsch (PKHeX).", 2)
+								}),
+								layout.Rigid(gap(10)),
+								layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("settings-done"), "primary", "Done", false, nil) }))
 						})
 					}))
 			})

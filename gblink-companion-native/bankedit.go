@@ -1,8 +1,10 @@
 // Moving Pokémon around in the Pokémon Bank's window, before anything is saved. Three modes, as
 // the buttons at the top of the bank:
-//   - Move: pick one Pokémon up and put it down (or drag it); one already there swaps places.
-//   - Move Multi: choose several, then drag one of them, click an empty slot, or send them all
-//     to the bank or the cartridge; they go into the empty slots from there on.
+//   - Move: drag a Pokémon to another slot; one already there swaps places.
+//   - Move Multi: choose several (click them, or drag a box over them), then drag one of them:
+//     they all go into the empty slots from there on.
+//
+// Every move is a drag (a click only shows a Pokémon's summary, or chooses it in Move Multi).
 //   - Release: mark Pokémon, then release them (once you save, they're gone for good).
 package main
 
@@ -112,15 +114,13 @@ func (b *BankSession) Tap(r slotRef) {
 	}
 	b.Note = ""
 	switch b.Mode {
-	case modeMulti:
+	case modeMulti: // a click only chooses: moving them is always a drag
 		if has {
 			if b.Multi[r] {
 				delete(b.Multi, r)
 			} else {
 				b.Multi[r] = true
 			}
-		} else if len(b.Multi) > 0 { // an empty slot: the chosen ones go there
-			b.moveGroup(b.picked(b.Multi), r)
 		}
 	case modeRelease:
 		if has {
@@ -130,8 +130,10 @@ func (b *BankSession) Tap(r slotRef) {
 				b.Marked[r] = true
 			}
 		}
-	default:
-		b.click(r)
+	default: // Move: a click only shows its summary; Pokémon are moved by dragging them
+		if !has {
+			b.Sel = nil
+		}
 	}
 	b.Rev++
 }
