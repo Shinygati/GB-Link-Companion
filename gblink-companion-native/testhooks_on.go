@@ -89,6 +89,63 @@ func startTestHooks(a *App) {
 						})
 					case "raise":
 						a.raise()
+					case "bank": // the Pokémon Bank's boxes on show: species per slot (0 empty)
+						s := a.ui.Snapshot()
+						if s.Bank == nil {
+							out = "no bank"
+							break
+						}
+						v := s.Bank.view()
+						type side struct {
+							Box     int
+							Species []int
+						}
+						r := struct {
+							Ready, Saving, Changed, Loaded   bool
+							SelPlace                         string // where the chosen Pokémon was met, as shown
+							Mode, Note                       string
+							ToBank, ToCart, Released, InBank int
+							Picked                           int
+							Cart, Bank                       side
+							Names, Icons                     bool
+							Moves, Items, Places             int
+							At                               [2]float32        // the pointer, in the boxes' coordinates
+							Rects                            map[string][4]int // the slots on show: "c:0" ... "b:29"
+						}{Ready: v.Ready, Saving: v.Saving, Changed: v.Counts.Any, Loaded: v.CartLoaded, Mode: v.Mode, Note: v.Note, ToBank: v.Counts.ToBank,
+							ToCart: v.Counts.ToCart, Released: v.Counts.Released, Picked: v.Picked,
+							InBank: v.InBank, Cart: side{Box: v.CartBox}, Bank: side{Box: v.BankBox}, Names: v.Data != nil, Icons: v.Icons != nil,
+							Rects: map[string][4]int{}}
+						if v.SelMon != nil {
+							r.SelPlace = v.Data.placeName(v.SelMon.MetPlace)
+						}
+						if v.Data != nil {
+							r.Moves, r.Items, r.Places = len(v.Data.Moves), len(v.Data.Items), len(v.Data.Places)
+						}
+						if w != nil {
+							done := make(chan struct{})
+							w.do(func() {
+								r.At = [2]float32{w.bankDrag.at.X, w.bankDrag.at.Y}
+								for _, x := range w.bankDrag.rects {
+									k := map[bool]string{false: "c", true: "b"}[x.ref.Bank]
+									r.Rects[fmt.Sprintf("%s:%d", k, x.ref.Slot)] = [4]int{x.r.Min.X, x.r.Min.Y, x.r.Max.X, x.r.Max.Y}
+								}
+								close(done)
+							})
+							<-done
+						}
+						for i := range v.Cart {
+							n, m := 0, 0
+							if v.Cart[i] != nil {
+								n = v.Cart[i].Species
+							}
+							if v.BankSlots[i] != nil {
+								m = v.BankSlots[i].Species
+							}
+							r.Cart.Species = append(r.Cart.Species, n)
+							r.Bank.Species = append(r.Bank.Species, m)
+						}
+						b, _ := json.Marshal(r)
+						out = string(b)
 					default:
 						out = "unknown " + strconv.Quote(f[0])
 					}

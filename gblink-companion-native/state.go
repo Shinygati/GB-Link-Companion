@@ -60,7 +60,7 @@ type Verify struct {
 
 type State struct {
 	Phase      string  // home | connect | load | play | finish | done   (backup: connect | load | dump | done)
-	Mode       string  // play | backup | restore | gbawc
+	Mode       string  // play | backup | restore | gbawc | bank
 	BackupPath string  // the file a backup was saved to
 	Verify     *Verify // the No-Intro check of a backup
 	DATInfo    string  // which No-Intro database is in use
@@ -91,6 +91,7 @@ type State struct {
 	WCChosen   []string    // the cards ticked in the list (remembered for the game)
 	WCReplace  *WonderCard // a card waiting for "Replace" (another one that keeps running is on)
 	Update     UpdateView  // a newer release on GitHub (version.go)
+	Bank       *BankSession `json:"-"` // the Pokémon Bank's boxes (bank.go): read and changed behind its own lock
 }
 
 // UI holds the state the window shows, and the answers to prompts.
@@ -261,7 +262,18 @@ func (a *App) closeWhileBusy() {
 		os.Exit(0)
 	}
 	ph := a.ui.Snapshot().Phase
-	if ph == "play" {
+	if s.bank != nil {
+		// the Pokémon Bank: changes not saved yet are left (the cartridge and the bank stay as
+		// they were); one being written is finished first
+		s.stopped.Store(true)
+		if ph != "finish" {
+			select {
+			case <-s.cancel:
+			default:
+				close(s.cancel)
+			}
+		}
+	} else if ph == "play" {
 		// closing the window closes mGBA too; its save is then copied to the cartridge in the
 		// background (the window comes back if the GBA has to be switched on)
 		s.closeMGBA()
@@ -314,7 +326,7 @@ func (a *App) sessionEnded() {
 	closed := a.win == nil
 	a.winMu.Unlock()
 	if closed {
-		if r := a.ui.Snapshot().Result; r == "done" || r == "cancelled" || r == "pending" || r == "gbawc" {
+		if r := a.ui.Snapshot().Result; r == "done" || r == "cancelled" || r == "pending" || r == "gbawc" || r == "bank" {
 			go func() { time.Sleep(300 * time.Millisecond); os.Exit(0) }()
 		} else {
 			a.raise()

@@ -67,3 +67,20 @@ func TestLangTables(t *testing.T) {
 		os.WriteFile(f[0], []byte(text), 0o644)
 	}
 }
+
+// The script must keep the places the app fills in: without "--@OVERRIDE@" a build's .sym never
+// reaches the script, and every ROM hack shows as unsupported.
+func TestLuaTemplatePlaceholders(t *testing.T) {
+	for _, p := range []string{"--@OVERRIDE@", "--@LANG@", "local fixSeed = true", "local controllerOn = true"} {
+		if !strings.Contains(luaSource, p) {
+			t.Errorf("the script has lost %q", p)
+		}
+	}
+	text := luaText(47187, `{ code = "BPRE", sym = true }`, "", false, true)
+	if !strings.Contains(text, `local OVERRIDE = { code = "BPRE", sym = true }`) {
+		t.Fatal("the .sym's addresses weren't put in the script")
+	}
+	if strings.Count(text, "local OVERRIDE") != 1 {
+		t.Fatal("OVERRIDE is declared more than once")
+	}
+}

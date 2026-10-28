@@ -27,7 +27,7 @@ fix_syso() {
 }
 
 build_windows() {
-  echo "=== Windows .exe ==="
+  echo "=== Building Windows ==="
   if ! command -v goversioninfo >/dev/null; then
     echo "Installing goversioninfo..."
     go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
@@ -35,12 +35,12 @@ build_windows() {
   go generate
   fix_syso
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-    go build -trimpath -ldflags "-s -w -H windowsgui" -o "$DIST/$NAME.exe" .
+    go build -trimpath -ldflags "-s -w -H windowsgui" -o "$DIST/GB-Link-Companion.exe" .
   echo "Built dist/$NAME.exe"
 }
 
 build_linux() {
-  echo "=== Linux AppImage ==="
+  echo "=== Building Linux AppImage ==="
   fix_syso
 
   # Gio needs cgo and these libraries; ImageMagick turns the .ico into the AppImage's icon

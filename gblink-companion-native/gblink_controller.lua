@@ -475,6 +475,7 @@ local rngFixed = nil
 -- Only once the game is running: gMain.callback2 is set by InitMainCallbacks(), after AgbMain's
 -- RegisterRamReset() has cleared IWRAM. A seed written before that (during the BIOS intro, or the
 -- first instructions after a reset) is wiped, and the script would see seed 0 and seed it again.
+-- (mGBA's constants table C is reached through _G: the script's own C, the RNG's increment, hides it)
 -- Only the unmodified game: the ROM's CRC32 must be retail Pokemon Emerald (USA, Europe), so a ROM
 -- hack is never touched, even one whose data sits where the original's does.
 local RETAIL_EMERALD_CRC = { [0x1F1C08FB] = true }
@@ -482,7 +483,7 @@ local function fixEmeraldSeed(cur)
   if not fixSeed or V.custom or V.game ~= "EMERALD" then return false end
   if rng.retail == nil then              -- worked out once a game (rng is reset on a reset)
     rng.retail = false
-    local ok, sum = pcall(function() return emu:checksum(C.CHECKSUM.CRC32) end)
+    local ok, sum = pcall(function() return emu:checksum(_G.C.CHECKSUM.CRC32) end)
     if ok and type(sum) == "string" and #sum == 4 then
       local b1, b2, b3, b4 = sum:byte(1, 4)  -- the byte order isn't documented: try both
       rng.retail = RETAIL_EMERALD_CRC[(b1 << 24) | (b2 << 16) | (b3 << 8) | b4] or
@@ -490,7 +491,10 @@ local function fixEmeraldSeed(cur)
     elseif ok and type(sum) == "number" then
       rng.retail = RETAIL_EMERALD_CRC[sum & 0xFFFFFFFF] or false
     end
-    if not rng.retail then
+    if not ok then
+      console:log("GB-Link Companion: couldn't check the ROM's checksum, so Emerald's starting seed is left alone (" ..
+                  tostring(sum):sub(1, 100) .. ").")
+    elseif not rng.retail then
       console:log("GB-Link Companion: not the unmodified Pokemon Emerald, so its starting seed is left alone.")
     end
   end

@@ -64,6 +64,21 @@ While you play, **Wonder Cards…** lists every card from the GB-Link team's [gb
 
 Wonder Cards only work with the original English games, checked against No-Intro's list of good dumps. Custom ROMs and ROM hacks still work with everything else: the save on your cartridge, the controller, and the second screen.
 
+### Pokémon Bank (Emerald, FireRed, LeafGreen)
+**Pokémon Bank** (at the top of the games screen, or Settings › Pokémon Enhancements) opens the boxes kept on your PC straight away: no GBA is needed to look through them or tidy them up. **Load from cartridge** reads your cartridge's PC boxes over GB-Link and shows them beside the bank, with the box icons and a summary laid out like PKHeX. Three modes at the top:
+
+- **Move:** drag a Pokémon to another slot, or click it and then click where it goes. A Pokémon already there swaps places.
+- **Move Multi:** drag a box over the slots to choose every Pokémon in it (hold Ctrl to add more), or click them one by one. Then drag one of them, click an empty slot, or send them all to the bank or the cartridge.
+- **Release:** mark Pokémon (by clicking, or with a box), then press Release. It asks first, and Undo brings them back until you save.
+
+Clicking a Pokémon shows everything about it: nature, ability, held item, IVs, EVs and stats, Hidden Power, moves and PP, where it was met (named as PKHeX names the places, from PKHeX's list, GPL-3.0), its ball, OT and IDs, friendship, Pokérus and each of its ribbons.
+
+Nothing changes until you press **Save**. Then the cartridge is checked to be the same one, with the same save, as when its boxes were opened; its save is backed up to your PC; the boxes are written as a new save (the game's previous save stays as its backup) and read back to check them; and only then is the bank on your PC updated. If anything stops part way, the next time you open the bank with that cartridge it works out where every Pokémon is, so none are lost.
+
+The bank is a folder for each box, with a `.pk3` file for each Pokémon, decrypted the way PKHeX saves them: PKHeX can open them, and `.pk3` files from PKHeX can be put in a box's folder (they go in its first free slots). Every save keeps a dated copy of the whole bank in its Backups folder (the last 30). Settings › Pokémon Enhancements has buttons for both folders.
+
+The names, moves, items, places and icons are read from your own game (a ROM in your games list, or the cartridge the first time) and kept on your PC. The icons can be read from an English cartridge, or from any Ruby, Sapphire, Emerald, FireRed or LeafGreen ROM in your games list; without one, the Pokémon show by name. Works with the English, French, German, Italian and Spanish games; not the Japanese ones yet. The party isn't shown: put a Pokémon in a box in the game to move it.
+
 ### Back up your cartridges
 **Back up a cartridge** copies the game (ROM) and its save to your PC. The ROM is checked against No-Intro's list of good dumps.
 

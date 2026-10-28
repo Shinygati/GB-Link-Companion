@@ -51,7 +51,7 @@ add("BPRE1", { game = "FIRERED", build = "QoL", custom = true, rng = 0x03005000,
 add("BPGE1", { game = "LEAFGREEN", build = "QoL", custom = true, rng = 0x03005000, party = 0x02024284, enemy = 0x0202402C, sb1ptr = 0x03005008, sb2ptr = 0x0300500C, mapHeader = 0x02036DFC, main = 0x030030F0, battleType = 0x02022B4C, opponent = 0x020386AE, battleMons = 0x02023BE4, battleStructPtr = 0x02023FE8, partyIdx = 0x02023BCE, speciesNames = 0x08246018, abilityNames = 0x0824FD78, natureNames = 0x084638A4, speciesInfo = 0x082548BC, trainers = 0x0823EC00, classNames = 0x0823E690, mapNames = 0x083F1C1C, seviiMapsecs = 0x083F1A14, mapGroups = 0x083527E4, frontPics = 0x082351E4, palettes = 0x08237444, shinyPalettes = 0x08238204, icons = 0x083D3710, iconPalIdx = 0x083D3DF0, iconPals = 0x083D3FA8, rmTiles = 0x083EF58C, rmPal = 0x083EF24C, rmKanto = 0x083F080C, rmSevii123 = 0x083F0A6C, rmSevii45 = 0x083F0B7C, rmSevii67 = 0x083F0C60, rmCursor = 0x083EF450, rmCursorPal = 0x083EF1CC, rmHero = 0x083EF494, rmHeroPal = 0x083EF1EC, rmHeroine = 0x083EF50C, rmHeroinePal = 0x083EF20C, layoutKanto = 0x083F2400, layoutSevii123 = 0x083F2694, layoutSevii45 = 0x083F2928, layoutSevii67 = 0x083F2BBC, scriptCtx = 0x03000EB0, scriptStatus = 0x03000EA8, lockControls = 0x03000F9C, cmdTable = 0x0815FA68, cmdTableEnd = 0x0815FDBC, ramScriptRet = 0x020370A4, intrTable = 0x03003540, cb1Overworld = 0x0805687C, cb2Overworld = 0x080568FC })
 
 -- The addresses of your own build, from a .sym file next to the ROM (filled in by GB-Link Companion)
-local OVERRIDE = nil
+--@OVERRIDE@
 
 -- Per-game layout differences that the symbol files don't give.
 local FAMILY = {
@@ -203,11 +203,10 @@ local function detect()
   local rev = r8(0x080000BC)
   LANG = code:sub(4, 4)
   -- a game in another language: GB-Link Companion found its addresses in the ROM (romfind.go)
-  if OVERRIDE and OVERRIDE.code == code and OVERRIDE.found then useBuild(OVERRIDE, rev); return end
+  -- your own build: GB-Link Companion checked its .sym against the ROM (symfile.go)
+  if OVERRIDE and OVERRIDE.code == code and (OVERRIDE.found or OVERRIDE.sym) then useBuild(OVERRIDE, rev); return end
   local builds = {}
-  -- a .sym next to the ROM: used if the ROM's data is where it says (else a .sym that isn't this
-  -- ROM's, e.g. one left next to an unmodified ROM, would make it a "custom build")
-  if OVERRIDE and OVERRIDE.code == code then builds[1] = OVERRIDE end
+  if OVERRIDE and OVERRIDE.code == code then builds[1] = OVERRIDE end   -- a .sym next to the ROM
   for _, v in ipairs(VERSIONS[code .. rev] or {}) do builds[#builds + 1] = v end
   if #builds == 0 then
     unsupported = "This game isn't supported: only Pokemon Ruby, Sapphire, Emerald, FireRed and " ..
@@ -475,6 +474,7 @@ local rngFixed = nil
 -- Only once the game is running: gMain.callback2 is set by InitMainCallbacks(), after AgbMain's
 -- RegisterRamReset() has cleared IWRAM. A seed written before that (during the BIOS intro, or the
 -- first instructions after a reset) is wiped, and the script would see seed 0 and seed it again.
+-- (mGBA's constants table C is reached through _G: the script's own C, the RNG's increment, hides it)
 -- Only the unmodified game: the ROM's CRC32 must be retail Pokemon Emerald (USA, Europe), so a ROM
 -- hack is never touched, even one whose data sits where the original's does.
 local RETAIL_EMERALD_CRC = { [0x1F1C08FB] = true }
@@ -482,7 +482,7 @@ local function fixEmeraldSeed(cur)
   if not fixSeed or V.custom or V.game ~= "EMERALD" then return false end
   if rng.retail == nil then              -- worked out once a game (rng is reset on a reset)
     rng.retail = false
-    local ok, sum = pcall(function() return emu:checksum(C.CHECKSUM.CRC32) end)
+    local ok, sum = pcall(function() return emu:checksum(_G.C.CHECKSUM.CRC32) end)
     if ok and type(sum) == "string" and #sum == 4 then
       local b1, b2, b3, b4 = sum:byte(1, 4)  -- the byte order isn't documented: try both
       rng.retail = RETAIL_EMERALD_CRC[(b1 << 24) | (b2 << 16) | (b3 << 8) | b4] or
@@ -490,7 +490,10 @@ local function fixEmeraldSeed(cur)
     elseif ok and type(sum) == "number" then
       rng.retail = RETAIL_EMERALD_CRC[sum & 0xFFFFFFFF] or false
     end
-    if not rng.retail then
+    if not ok then
+      console:log("GB-Link Companion: couldn't check the ROM's checksum, so Emerald's starting seed is left alone (" ..
+                  tostring(sum):sub(1, 100) .. ").")
+    elseif not rng.retail then
       console:log("GB-Link Companion: not the unmodified Pokemon Emerald, so its starting seed is left alone.")
     end
   end

@@ -196,7 +196,10 @@ type Window struct {
 	wcSel               string // the card whose description is open
 	wcHackOK            bool   // the ROM hack warning was read (wcgui.go)
 	wcList              widget.List
-	setList             widget.List // Settings, when it doesn't fit
+	bankIcons           bankIconCache // the Pokémon Bank's box icons (bankgui.go)
+	bankDrag            bankDrag      // dragging Pokémon between its slots
+	pageW               unit.Dp       // the width of the page's column
+	setList             widget.List   // Settings, when it doesn't fit
 	detailsOpen         bool
 	pending             chan func() // work to run on the window's own goroutine (tests)
 }
@@ -563,6 +566,11 @@ func (w *Window) frame(gtx C) {
 	home := st.Phase == "home"
 	setup := home && w.needsSetup()
 	w.handleClicks(gtx, setup)
+	// the Pokémon Bank's boxes can use the whole width of the window
+	w.pageW = 860
+	if st.Mode == "bank" && (st.Phase == "play" || st.Phase == "finish") {
+		w.pageW = 1500
+	}
 
 	if home && !setup {
 		w.filterGames()
@@ -610,7 +618,11 @@ func (w *Window) pageOf(gtx C, blocks []layout.Widget) D {
 		if i == len(blocks)-1 {
 			in.Bottom = 32
 		}
-		return in.Layout(gtx, func(gtx C) D { return column(gtx, 860, blocks[i]) })
+		pw := w.pageW
+		if pw == 0 {
+			pw = 860
+		}
+		return in.Layout(gtx, func(gtx C) D { return column(gtx, pw, blocks[i]) })
 	})
 }
 
@@ -645,6 +657,7 @@ func (w *Window) handleClicks(gtx C, setup bool) {
 		go a.checkUpdates(true)
 	}
 	w.wcClicks(gtx)
+	w.bankClicks(gtx)
 	for _, what := range []string{"rom", "folder", "mgba"} {
 		for _, where := range []string{"", "-2", "-set"} {
 			if w.b("browse-" + what + where).Clicked(gtx) {
@@ -927,6 +940,14 @@ func (w *Window) topbar(gtx C) D {
 						}
 						return w.labelMax(gtx, 12.5, font.Normal, w.pal.muted, "Play in mGBA with the save on your real cartridge", 1)
 					}))
+			}),
+			layout.Rigid(func(gtx C) D { // the Pokémon Bank, where everyone sees it
+				if st.Phase != "home" || gtx.Constraints.Max.X < gtx.Dp(480) {
+					return D{}
+				}
+				return layout.Inset{Right: 10}.Layout(gtx, func(gtx C) D {
+					return w.button(gtx, w.b("bank-top"), "secondary", "Pokémon Bank", false, icGamepad)
+				})
 			}),
 			layout.Rigid(func(gtx C) D { // a newer version on GitHub
 				if !st.Update.Newer {
@@ -1232,6 +1253,10 @@ func (w *Window) homeHead(gtx C) D {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx C) D { return w.label(gtx, 24, font.SemiBold, w.pal.text, "Choose a game") }),
 				layout.Rigid(func(gtx C) D {
+					return w.button(gtx, w.b("bank-home"), "ghost", "Pokémon Bank", false, icGamepad)
+				}),
+				layout.Rigid(gap(4)),
+				layout.Rigid(func(gtx C) D {
 					return w.button(gtx, w.b("restore"), "ghost", "Restore a save", false, icUpload)
 				}),
 				layout.Rigid(gap(4)),
@@ -1402,7 +1427,7 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 	if phase == "connect" {
 		phase = "load"
 	}
-	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup" || st.Result == "restore" || st.Result == "gbawc")
+	doneAll := st.Phase == "done" && (st.Result == "done" || st.Result == "backup" || st.Result == "restore" || st.Result == "gbawc" || st.Result == "bank")
 	eyebrow := map[string]string{"load": "Getting ready", "play": "Now playing", "finish": "Saving to the cartridge"}[phase]
 	if st.Mode == "backup" {
 		eyebrow = map[string]string{"load": "Backing up a cartridge", "dump": "Backing up"}[phase]
@@ -1412,6 +1437,9 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 	}
 	if st.Mode == "gbawc" {
 		eyebrow = "Wonder Cards on your GBA"
+	}
+	if st.Mode == "bank" {
+		eyebrow = map[string]string{"load": "Opening the boxes", "play": "Pokémon Bank", "finish": "Saving to the cartridge"}[phase]
 	}
 	if phase == "done" {
 		eyebrow = map[bool]string{true: "Finished", false: "Stopped"}[doneAll]
@@ -1436,6 +1464,25 @@ func (w *Window) sessionView(gtx C) []layout.Widget {
 		func(gtx C) D {
 			return layout.Inset{Top: 22}.Layout(gtx, func(gtx C) D { return w.stepper(gtx, st.Mode, phase, doneAll) })
 		},
+	}
+	if st.Mode == "bank" && (st.Phase == "play" || st.Phase == "finish") {
+		// the Pokémon Bank's boxes need the room: no header and steps while they're open
+		blocks = blocks[:0]
+		loading := st.Bank != nil && st.Bank.view().Loading
+		if (st.Phase == "finish" || loading) && st.Prompt == nil && st.Progress == nil && st.Status != "" {
+			blocks = append(blocks, func(gtx C) D { return layout.Inset{Bottom: 14}.Layout(gtx, w.statusCard) })
+		}
+		if p := st.Prompt; p != nil {
+			blocks = append(blocks, func(gtx C) D {
+				return layout.Inset{Bottom: 14}.Layout(gtx, func(gtx C) D { return w.promptCard(gtx, p) })
+			})
+		}
+		if pr := st.Progress; pr != nil {
+			blocks = append(blocks, func(gtx C) D {
+				return layout.Inset{Bottom: 14}.Layout(gtx, func(gtx C) D { return w.progressCard(gtx, pr) })
+			})
+		}
+		return append(blocks, w.bankEditor, w.details)
 	}
 	if p := st.Prompt; p != nil {
 		blocks = append(blocks, func(gtx C) D { return w.promptCard(gtx, p) })
@@ -1516,6 +1563,10 @@ func (w *Window) stepper(gtx C, mode, phase string, doneAll bool) D {
 	if mode == "restore" {
 		steps = []string{"Check the cartridge", "Write the save", "Checked and done"}
 		cur = map[string]int{"load": 0, "dump": 1}[phase]
+	}
+	if mode == "bank" {
+		steps = []string{"Read the cartridge", "Move your Pokémon", "Save to the cartridge"}
+		cur = map[string]int{"load": 0, "play": 1, "finish": 2}[phase]
 	}
 	if mode == "gbawc" {
 		steps = []string{"Start Emerald on the GBA", "Walk around in the game", "Send Wonder Cards"}
@@ -1859,10 +1910,12 @@ func (w *Window) doneCard(gtx C) D {
 		ibg, ifg, ic, title = w.pal.warnSoft, w.pal.warn, icWarn, "The backup didn't finish"
 		if st.Mode == "gbawc" {
 			title = "Wonder Cards stopped"
+		} else if st.Mode == "bank" {
+			title = "The Pokémon Bank stopped"
 		} else if st.Mode == "restore" {
 			title = "The save wasn't written"
 		}
-	case "gbawc":
+	case "gbawc", "bank":
 		ibg, ifg, ic, title = w.pal.okSoft, w.pal.ok, icCheck, "Done"
 	}
 	type btn struct{ id, style, label string }
@@ -1876,6 +1929,8 @@ func (w *Window) doneCard(gtx C) D {
 		buttons = []btn{{"restore-again", "primary", "Write another save"}, {"home", "secondary", "Back to games"}}
 	case st.Mode == "gbawc":
 		buttons = []btn{{"gbawc-again", "primary", "Start again"}, {"home", "secondary", "Back to games"}}
+	case st.Mode == "bank":
+		buttons = []btn{{"bank-again", "primary", "Open the Pokémon Bank again"}, {"home", "secondary", "Back to games"}}
 	}
 	if txt == "" && r == "cancelled" {
 		txt = "Nothing was changed on the cartridge."
@@ -2119,7 +2174,7 @@ func (w *Window) settingsDialog(gtx C) {
 						div,
 						row("Ask me straight away", "If you save while the GBA is off, ask to switch it on right then, instead of when mGBA closes.", "", sw(&w.setAsk)),
 						div,
-						row("Pokémon Enhancements", "Wonder Cards (including your own .wc3 files), the cartridge's clock, Emerald's seed fix and Discord shiny alerts, for Ruby, Sapphire, Emerald, FireRed and LeafGreen.", "",
+						row("Pokémon Enhancements", "The Pokémon Bank, Wonder Cards (including your own .wc3 files), the cartridge's clock, Emerald's seed fix and Discord shiny alerts, for Ruby, Sapphire, Emerald, FireRed and LeafGreen.", "",
 							func(gtx C) D { return w.button(gtx, w.b("set-pokemon"), "secondary", "Open ›", false, nil) }),
 						div,
 						row("Version "+appVersion, "Updates come from github.com/Shinygati/GB-Link-Companion (Releases). It checks when it starts.", st.Update.Text,
@@ -2154,6 +2209,21 @@ func (w *Window) settingsDialog(gtx C) {
 								return w.label(gtx, 13, font.Normal, w.pal.muted, "Extras for Pokémon Ruby, Sapphire, Emerald, FireRed and LeafGreen. Other games aren't affected by anything here.")
 							})
 						}),
+						section("Pokémon Bank"),
+						row("Pokémon Bank", "Emerald, FireRed and LeafGreen on your GBA, over GB-Link: move Pokémon between the cartridge's PC boxes and boxes kept on this PC, "+
+							"with their box icons like PKHeX. When you save, the cartridge is written and checked first, then the bank.", "",
+							func(gtx C) D { return w.button(gtx, w.b("bank"), "secondary", "Open…", false, icGamepad) }),
+						div,
+						row("The bank's files", "A folder for each box, with a .pk3 file for each Pokémon that PKHeX can open (and .pk3 files from PKHeX can be put in). "+
+							"Every save keeps a dated copy of the whole bank in Backups (the last 30).", "",
+							func(gtx C) D {
+								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(func(gtx C) D { return w.button(gtx, w.b("bank-backups"), "ghost", "Backups", false, icFolder) }),
+									layout.Rigid(gap(6)),
+									layout.Rigid(func(gtx C) D {
+										return w.button(gtx, w.b("bank-folder-set"), "secondary", "Open folder", false, icFolder)
+									}))
+							}),
 						section("Wonder Cards"),
 						row("Wonder Cards while you play", "Emerald, FireRed and LeafGreen: show the Wonder Cards button on the play screen, to send cards to the game in mGBA.", "", sw(&w.setWC)),
 						div,

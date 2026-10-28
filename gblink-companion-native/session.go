@@ -35,6 +35,8 @@ type Session struct {
 	saveType   int
 	bridge     *Bridge
 	gbawc      *gbaWC        // Wonder Cards on a real GBA (wcgba.go)
+	bank       *BankSession  // the Pokémon Bank (bank.go)
+	cartWhat   string        // the cartridge to put in, when there's no game (ensureHelper)
 	stopped    atomic.Bool   // the window was closed before the game started: stop (closeWhileBusy)
 	cancel     chan struct{} // closed when the player cancels a backup
 	helperLg   byte          // the language the helper's text is in now (0: not known)
@@ -100,6 +102,8 @@ func (s *Session) ensureHelper(why string) error {
 		which := "the cartridge you want to back up"
 		if s.game != nil {
 			which = s.game.Name()
+		} else if s.cartWhat != "" {
+			which = s.cartWhat
 		}
 		id := s.ui.ShowPrompt(Prompt{Kind: "power", Title: why,
 			Text: "Hold START and SELECT while you switch the GBA on, with " + which +
