@@ -19,7 +19,6 @@ An unofficial companion app for the [GB-Link](https://gblink.io) USB adapter, **
 - **Flash carts in the banks**: a flash cart showing its own menu (like the EZ-Flash Junior) has its save read straight from its SRAM.
 - **Every language** in both banks and when playing: English, French, German, Italian, Spanish and Japanese games (and Korean Gold and Silver in the Game Boy bank), from a cartridge or a save file. Japanese and Korean names are shown with your system's fonts.
 - **Drag and drop only** in both banks: every move is a drag (one Pokémon onto another swaps them). Only Release works by clicking.
-- The app now says it was made by Shinygati (on the main screen and in Settings), with credits for everyone whose work it uses.
 
 ---
 
@@ -75,7 +74,6 @@ A ROM hack moves the game's data around, so the second screen has to be told whe
 - The hack has to keep the original game's code in its header (`BPEE` for Emerald, `BPRE`/`BPGE` for FireRed/LeafGreen, `AXVE`/`AXPE` for Ruby/Sapphire). This is the decomps' default.
 - It needs the original games' data layouts, such as how a Pokémon is stored and the save blocks. Hacks that change these a lot aren't supported, for example ones with more than the original 386 species or a reworked Pokémon structure (like pokeemerald-expansion).
 - With a hack, the RNG screen is hidden (the RNG may work differently), and Wonder Cards aren't offered (they're made for the original ROMs). The Wild Pokémon, Trainer, Map and Encounter tracker screens work.
-- Shinygati's [pokeemeraldQoL](https://github.com/Shinygati/pokeemeraldQoL) and [pokefireredQoL](https://github.com/Shinygati/pokefireredQoL) (v1.1), built from their `master` branches, are recognised without a `.sym`. Newer builds need one like any other hack.
 
 <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/a956b784-de69-47d7-a644-038d1a4714a1" /> <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/7077186e-aac4-4f5d-b936-84b9e4696ab8" />
 <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/71e85133-4fa4-4f23-b3cb-2feb82e99cca" /> <img width="500" height="666" alt="image" src="https://github.com/user-attachments/assets/ad630bc8-3deb-45d4-8627-4deffa235c1a" />
@@ -92,7 +90,7 @@ While you play, **Wonder Cards…** lists every card from the GB-Link team's [gb
 Wonder Cards only work with the original English games, checked against No-Intro's list of good dumps. Custom ROMs and ROM hacks still work with everything else: the save on your cartridge, the controller, and the second screen.
 
 ### Pokémon Bank (Emerald, FireRed, LeafGreen)
-**Pokémon Bank** (at the top of the games screen, or Settings › Pokémon Enhancements) opens the boxes kept on your PC straight away: no GBA is needed to look through them or tidy them up. **Load from cartridge** reads your cartridge's PC boxes over GB-Link and shows them beside the bank, with the box icons and a summary laid out like PKHeX. Three modes at the top:
+**Pokémon Bank** (at the top of the games screen, or Settings › Pokémon Enhancements) opens the boxes kept on your PC straight away: no GBA is needed to look through them or tidy them up. **Load from cartridge** reads your cartridge's PC boxes over GB-Link and shows them beside the bank, with the box icons and a summary laid out. Three modes at the top:
 
 - **Move:** drag a Pokémon to another slot. A Pokémon already there swaps places. Clicking one only shows its summary: nothing moves without a drag.
 - **Move Multi:** drag a box over the slots to choose every Pokémon in it (hold Ctrl to add more), or click them one by one to choose them. Then drag any of them to move them all.
@@ -100,13 +98,13 @@ Wonder Cards only work with the original English games, checked against No-Intro
 
 **Open a save file…** opens a `.sav` file instead of a cartridge, for example one from a flash cart's SD card or from an emulator. Emerald is recognised by itself; for FireRed and LeafGreen the app asks which one it is. On Save, the file is written (a copy of it from before is kept next to it).
 
-Clicking a Pokémon shows everything about it: nature, ability, held item, IVs, EVs and stats, Hidden Power, moves and PP, where it was met (named as PKHeX names the places, from PKHeX's list, GPL-3.0), its ball, OT and IDs, friendship, Pokérus and each of its ribbons.
+Clicking a Pokémon shows everything about it: nature, ability, held item, IVs, EVs and stats, Hidden Power, moves and PP, where it was met, its ball, OT and IDs, friendship, Pokérus and each of its ribbons.
 
 Nothing changes until you press **Save**. Then the cartridge is checked to be the same one, with the same save, as when its boxes were opened; its save is backed up to your PC; the boxes are written as a new save (the game's previous save stays as its backup) and read back to check them; and only then is the bank on your PC updated. If anything stops part way, the next time you open the bank with that cartridge it works out where every Pokémon is, so none are lost.
 
-The bank is a folder for each box, with a `.pk3` file for each Pokémon, decrypted the way PKHeX saves them: PKHeX can open them, and `.pk3` files from PKHeX can be put in a box's folder (they go in its first free slots). Every save keeps a dated copy of the whole bank in its Backups folder (the last 30). Settings › Pokémon Enhancements has buttons for both folders.
+The bank is a folder for each box, with a `.pk3` file for each Pokémon. Every save keeps a dated copy of the whole bank in its Backups folder (the last 30). Settings › Pokémon Enhancements has buttons for both folders.
 
-The names, moves, items, places and icons are read from your own game (a ROM in your games list, or the cartridge the first time) and kept on your PC. The icons can be read from an English cartridge, or from any Ruby, Sapphire, Emerald, FireRed or LeafGreen ROM in your games list; without one, the Pokémon show by name. Works with every language of the three games: English, French, German, Italian, Spanish and Japanese (a Japanese save file is recognised by itself, as PKHeX recognises one). Pokémon move between languages as they do when trading between the games themselves. For a Japanese game, the move, item and place names come from another of your games the bank has read before, as they're numbered the same in every language. The party isn't shown: put a Pokémon in a box in the game to move it.
+The names, moves, items, places and icons are read from your own game (a ROM in your games list, or the cartridge the first time) and kept on your PC. The icons can be read from an English cartridge, or from any Ruby, Sapphire, Emerald, FireRed or LeafGreen ROM in your games list; without one, the Pokémon show by name. Works with every language of the three games: English, French, German, Italian, Spanish and Japanese (a Japanese save file is recognised by itself. Pokémon move between languages as they do when trading between the games themselves. For a Japanese game, the move, item and place names come from another of your games the bank has read before, as they're numbered the same in every language. The party isn't shown: put a Pokémon in a box in the game to move it.
 
 ### Game Boy Pokémon Bank (Red, Blue, Yellow, Gold, Silver, Crystal)
 **Pokémon Bank** now asks which bank to open. The **Game Boy Pokémon Bank** is a separate bank for the six Game Boy and Game Boy Color Pokémon games. Pokémon move freely between all six, but never between a Game Boy game and a GBA game: the two banks are kept completely apart.
@@ -116,9 +114,9 @@ The names, moves, items, places and icons are read from your own game (a ROM in 
 - Moving works as in the GBA bank: **drag only** (Move and Move Multi), with Release the only clicking action, and Undo until you save.
 - Clicking a Pokémon shows its summary: level, DVs (and whether it's shiny), stat experience, stats, moves and PP, held item, OT and ID, and for Gold, Silver and Crystal its friendship, Pokérus and the level it was caught at (Crystal).
 - **Between generations it works like the Time Capsule:** a Pokémon from Gold, Silver or Crystal can only go to Red, Blue or Yellow if it's one of the first 151, isn't an egg, and knows only generation 1 moves. Its held item becomes a catch rate, as the Time Capsule does. The app tells you why when one can't go.
-- **Reading and writing saves uses PKHeX's own code** (ported from PKHeX's SAV1/SAV2, PK1/PK2 and box-list code, GPL-3.0), so the box lists, the current-box copy, the checksums (and Gold, Silver and Crystal's backup copy of the save) are written the way PKHeX writes them. Every language is supported: the international games (English, French, German, Italian, Spanish), the Japanese ones (9 boxes of 30 in Gold, Silver and Crystal, 8 of 30 in Red, Green, Blue and Yellow) and Korean Gold and Silver, each with PKHeX's own layout for it. As in the games themselves (and in PKHeX), Japanese, Korean and international Pokémon can't be traded with each other, so the bank only lets each go back to a game of its own kind; a slot shows **JP** or **KO** for those from Japanese and Korean games.
+- **Reading and writing saves** Every language is supported: the international games (English, French, German, Italian, Spanish), the Japanese ones (9 boxes of 30 in Gold, Silver and Crystal, 8 of 30 in Red, Green, Blue and Yellow) and Korean Gold and Silver. As in the games themselves, Japanese, Korean and international Pokémon can't be traded with each other, so the bank only lets each go back to a game of its own kind; a slot shows **JP** or **KO** for those from Japanese and Korean games.
 - **Nothing is lost if it stops part way:** the bank writes a note of what it's about to do first, then writes the cartridge or file and reads it back, and only then updates the bank on your PC. Next time, it finishes or undoes what was left.
-- The bank is a folder for each box (`Pokemon Bank GB/Boxes`), with a `.pk1` or `.pk2` file for each Pokémon, the same files PKHeX saves. Dated backups of the whole bank are kept in its Backups folder.
+- The bank is a folder for each box (`Pokemon Bank GB/Boxes`), with a `.pk1` or `.pk2` file for each Pokémon. Dated backups of the whole bank are kept in its Backups folder.
 
 ### Cartridge tools
 **Cartridge tools** on the games screen has everything for working on a cartridge directly. GBA cartridges use the GB-Link Companion helper (now as fast as GB-Link Cart Doctor); Game Boy and Game Boy Color cartridges use GB-Link Cart Doctor's own programs, with the GBA switched into Game Boy Color mode.
@@ -213,8 +211,6 @@ The AppImage will be created as `GB-Link-Companion-x86_64.AppImage`.
 ---
 
 ## Credits
-
-**GB-Link Companion was created by Shinygati.** It builds on the work of:
 
 - **The GB-Link team** ([gblink.io](https://gblink.io)) for the GB-Link adapter and their open-source tools, which this app builds on:
   - the adapter's protocol and multiboot (ported from their web tools),
