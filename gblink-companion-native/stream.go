@@ -36,13 +36,43 @@ const (
 	streamWords    = streamSection / 4
 	maxStreamSave  = 0x10000 // a command moves at most 64 KB of a save
 	streamWordWait = 2 * time.Second
+
+	// The GBA redraws its progress bar (a few ms, far longer than the gap between two words) right
+	// after it's armed the first word of a section, whenever the percentage has changed. A host
+	// that starts clocking words straight away catches it deaf mid-section: the section fails,
+	// the two ends lose count, and the read starts over (the progress bar of the app flicking
+	// between 0% and 1%). So after the section that moves the percentage, wait for the drawing.
+	streamDrawWait = 40 * time.Millisecond
 )
 
 // errStreamDesync: the two ends lost step; the whole command is tried again.
 var errStreamDesync = errors.New("link out of step")
 
-// Streams says whether the helper running on the GBA knows the streamed transfers.
-func (h *Helper) Streams() bool { return h.version >= helperStreams }
+// What the player sees when a streamed transfer can't be made to work. Either one also switches
+// the streamed transfers off for the rest of the session (Helper.noStream), so the callers fall
+// back to the acknowledged, one-packet-at-a-time commands, which cope with a slower link.
+var (
+	errStreamDamaged  = linkErr("The data kept arriving damaged - check the link cable")
+	errStreamLostStep = linkErr("The link kept losing step - check the link cable")
+)
+
+// Streams says whether the helper running on the GBA knows the streamed transfers, and they're
+// still working on this link.
+func (h *Helper) Streams() bool { return streamedSaves && h.version >= helperStreams && !h.noStream }
+
+// streamedSaves: whether saves are moved with the streamed transfers at all. Off: on real
+// hardware they restart over and over (the progress jumping between 0% and 1%) before giving up,
+// so saves go the acknowledged way, which works first time. Set to true to try the streams again.
+const streamedSaves = false
+
+// widenGap gives the GBA more time between two words (the acknowledged commands do the same when
+// they slip). The streamed transfers have no acknowledgement per word, so on real hardware a gap
+// that's too tight shows up as sections that never pass their check.
+func (h *Helper) widenGap() {
+	if h.gap < 300 {
+		h.gap += 40
+	}
+}
 
 // startStream sends a streamed command's packet (the GBA answers with a gate, not a RESULT).
 func (h *Helper) startStream(cmd int, args []uint32) error {
@@ -90,7 +120,8 @@ func (h *Helper) streamIn(n int, progress func(done int)) ([]byte, error) {
 	out := make([]byte, n)
 	polls := make([]uint32, streamWords+1)
 	retries := 0
-	for s := 0; s < n/streamSection; {
+	sections, lastPct := n/streamSection, 0 // lastPct: what the GBA last drew (it starts at 0)
+	for s := 0; s < sections; {
 		resp, err := h.link.Words(polls, streamWordWait)
 		if err != nil {
 			return nil, err
@@ -109,6 +140,12 @@ func (h *Helper) streamIn(n int, progress func(done int)) ([]byte, error) {
 			}
 			s++
 			retries = 0
+			// the GBA works out the same percentage (sections done * 100 / sections) and redraws
+			// its bar when it changes, so leave it alone until it's done (see streamDrawWait)
+			if pct := s * 100 / sections; s < sections && pct != lastPct {
+				lastPct = pct
+				time.Sleep(streamDrawWait)
+			}
 			if progress != nil {
 				progress(s * streamSection)
 			}
@@ -116,7 +153,7 @@ func (h *Helper) streamIn(n int, progress func(done int)) ([]byte, error) {
 		}
 		if retries++; retries > 50 {
 			h.link.word(sAbort)
-			return nil, linkErr("The data kept arriving damaged - check the link cable")
+			return nil, errStreamDamaged
 		}
 		if _, err := h.link.word(sFail); err != nil {
 			return nil, err
@@ -152,7 +189,7 @@ func (h *Helper) streamOut(data []byte, progress func(done int)) error {
 			}
 		case gFail:
 			if retries++; retries > 8 {
-				return linkErr("The data kept arriving damaged - check the link cable")
+				return errStreamDamaged
 			}
 		default:
 			return errStreamDesync
@@ -162,11 +199,19 @@ func (h *Helper) streamOut(data []byte, progress func(done int)) error {
 }
 
 // streamTry runs one streamed command up to 4 times, getting the link back in step in between.
+// When the data keeps arriving damaged or the two ends keep losing step, the gap between words
+// is widened before each new try, and if it still fails the streamed transfers are switched off
+// (see Streams) so the caller can use the slower acknowledged commands instead.
 func (h *Helper) streamTry(f func() error) error {
 	var err error
 	for try := 0; try < 4; try++ {
-		if try > 0 && !h.recover() {
-			break
+		if try > 0 {
+			if err == errStreamDamaged || err == errStreamDesync {
+				h.widenGap() // recover() below sends the new timing to the adapter
+			}
+			if !h.recover() {
+				break
+			}
 		}
 		if err = f(); err == nil {
 			return nil
@@ -179,7 +224,10 @@ func (h *Helper) streamTry(f func() error) error {
 		}
 	}
 	if err == errStreamDesync {
-		err = linkErr("The link kept losing step - check the link cable")
+		err = errStreamLostStep
+	}
+	if err == errStreamDamaged || err == errStreamLostStep {
+		h.noStream = true
 	}
 	return err
 }

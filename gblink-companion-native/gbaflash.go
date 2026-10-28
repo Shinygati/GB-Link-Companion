@@ -72,8 +72,10 @@ func (p *copProgram) verify(ref any, a, n int) copHandle {
 	return p.op(copVerify, ref, a, n, 2)
 }
 func (p *copProgram) crc32(a, n int) copHandle { return p.op(copCRC32, a, n, 0, 1) }
+// show: what the GBA's screen says, with its bar at pct. The GBA takes whole percents, so pct is
+// rounded to the nearest (cutting the fraction off left its bar up to 1% behind the PC's).
 func (p *copProgram) show(id int, pct float64) copHandle {
-	return p.op(copShow, id, max(0, min(100, int(pct))), 0, 0)
+	return p.op(copShow, id, max(0, min(100, int(pct+0.5))), 0, 0)
 }
 func (p *copProgram) srcmd(a int, v any) copHandle {
 	val := uint32(0xFFFFFFFF)

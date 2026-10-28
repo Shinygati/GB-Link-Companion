@@ -461,6 +461,9 @@ type Helper struct {
 	version uint32
 	// stop, if set, is asked during a streamed ROM dump whether to stop (Cancel)
 	stop func() bool
+	// noStream: the streamed transfers kept failing on this link, so the acknowledged commands
+	// are used instead (see Streams in stream.go)
+	noStream bool
 }
 
 func (h *Helper) Configure() {
@@ -712,15 +715,23 @@ func (h *Helper) ReadSave(stype int, progress func(done, total int)) ([]byte, er
 		progress(0, size)
 		out := make([]byte, 0, size)
 		steps := (size + maxStreamSave - 1) / maxStreamSave
+		var failed error
 		for k := 0; k < steps; k++ {
 			off := k * maxStreamSave
 			b, err := h.streamReadSave(stype, off, min(maxStreamSave, size-off), k, steps, func(d int) { progress(off+d, size) })
 			if err != nil {
-				return nil, err
+				failed = err
+				break
 			}
 			out = append(out, b...)
 		}
-		return out, nil
+		if failed == nil {
+			return out, nil
+		}
+		if h.Streams() || !h.recover() { // not a streaming problem (or the GBA's gone): report it
+			return nil, failed
+		}
+		// the streamed transfer doesn't work on this link: read it the slower, acknowledged way
 	}
 	out := make([]byte, 0, size)
 	steps := (size + saveReadChunk - 1) / saveReadChunk
@@ -769,9 +780,11 @@ func (h *Helper) WriteSave(stype int, data, old []byte, progress func(done, tota
 			progress(0, total)
 		}
 		done, blocks := 0, 0
+		var failed error
 		for k, r := range ranges {
 			if err := h.streamWriteSave(stype, r[0], data[r[0]:r[1]], k, len(ranges), func(d int) { progress(done+d, total) }); err != nil {
-				return blocks, err
+				failed = err
+				break
 			}
 			done += r[1] - r[0]
 			blocks += (r[1] - r[0] + saveChunk - 1) / saveChunk
@@ -779,7 +792,14 @@ func (h *Helper) WriteSave(stype int, data, old []byte, progress func(done, tota
 				h.between()
 			}
 		}
-		return blocks, nil
+		if failed == nil {
+			return blocks, nil
+		}
+		if h.Streams() || !h.recover() { // not a streaming problem (or the GBA's gone): report it
+			return blocks, failed
+		}
+		// the streamed transfer doesn't work on this link: write the blocks the slower, acknowledged
+		// way (writing a block again is harmless, so it starts over from the first changed one)
 	}
 	var chunks []int
 	for off := 0; off < size; off += saveChunk {
