@@ -310,6 +310,7 @@ func (s *Session) runGB() {
 		s.ui.Finish("cancelled", "")
 		return
 	}
+	s.gbAskController()
 	proc, err := s.startMGBA(mgba)
 	if err != nil {
 		s.ui.Ask(Prompt{Kind: "error", Title: "mGBA didn't start", Text: err.Error(), Buttons: []Button{{ID: "ok", Label: "OK", Style: "primary"}}})
@@ -319,6 +320,13 @@ func (s *Session) runGB() {
 	s.ui.SetPhase("play")
 	s.ui.SetStatus("Playing in mGBA", "ok")
 	s.gbWatch(proc)
+	if s.bridge != nil {
+		s.bridge.stop()
+		s.bridge = nil
+	}
+	if s.gbCtl { // the GBA is running the helper: it has to be switched to Game Boy Color mode again
+		s.gbc = nil
+	}
 	time.Sleep(500 * time.Millisecond)
 	s.ui.SetPhase("finish")
 	s.gbBackupMGBASave()
@@ -374,6 +382,17 @@ func (s *Session) gbWatch(p *mgbaProc) {
 			continue
 		}
 		stableSince = time.Time{}
+		if s.gbCtl { // the GBA is the controller: the save waits on this PC until mGBA is closed
+			if s.gbNeedsPush() {
+				s.gbBackupMGBASave()
+				s.markPending()
+				if !warned {
+					s.ui.Log("In-game save kept on this PC: it's copied to the cartridge when you close mGBA.")
+					warned = true
+				}
+			}
+			continue
+		}
 		s.linkMu.Lock()
 		if !s.gbNeedsPush() {
 			s.linkMu.Unlock()
@@ -401,6 +420,31 @@ func (s *Session) gbWatch(p *mgbaProc) {
 			warned = true
 		}
 	}
+}
+
+// gbAskController offers the GBA as the controller: it runs the helper in GBA mode, so the
+// Game Boy cartridge comes out while playing, and the save goes back to it when mGBA is closed.
+func (s *Session) gbAskController() {
+	if !s.app.settings().Controller || s.stopped.Load() {
+		return
+	}
+	if s.ui.Ask(Prompt{Kind: "question", Title: "Use your GBA as the controller?",
+		Text: "The GBA runs GB-Link Companion's helper while you play, so the Game Boy cartridge has to come out. " +
+			"Your in-game saves are kept on this PC and copied to the cartridge when you close mGBA.",
+		Buttons: []Button{{ID: "gba", Label: "Use the GBA as the controller", Style: "primary"},
+			{ID: "keys", Label: "Play with the keyboard or a pad", Style: "secondary"}}}) != "gba" {
+		return
+	}
+	s.linkMu.Lock()
+	s.link.ConfigureGBA() // the helper runs in GBA mode, at 3.3 V
+	err := s.ensureHelper("Switch on your GBA to use it as the controller")
+	s.linkMu.Unlock()
+	if err != nil {
+		s.ui.Log("Playing without the GBA as the controller.")
+		return
+	}
+	s.gbCtl = true
+	s.ui.Log("The GBA is the controller. Put the cartridge back in when you're asked to, after closing mGBA.")
 }
 
 // gbFindROM looks through the games list for this cartridge's game.

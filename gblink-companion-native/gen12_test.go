@@ -209,3 +209,13 @@ func TestGBConversions(t *testing.T) {
 		t.Fatal("reading the pk2 back", err)
 	}
 }
+
+func TestGen3ItemFallback(t *testing.T) {
+	var d *bankData
+	if n := d.itemName(13); n != "Potion" {
+		t.Fatalf("item 13: %q", n)
+	}
+	if n := d.itemName(4); n != "Poké Ball" {
+		t.Fatalf("item 4: %q", n)
+	}
+}

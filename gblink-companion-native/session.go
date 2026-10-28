@@ -45,6 +45,7 @@ type Session struct {
 	proc       atomic.Pointer[mgbaProc] // the mGBA that's running (closed when the app is: closeMGBA)
 	gbc        *gbClient                // a Game Boy cartridge through the GBA in Game Boy Color mode (gbsession.go)
 	gbRAM      int                      // ...the size of its save
+	gbCtl      bool                     // a Game Boy game with the GBA running the helper as its controller
 	gbbank     *GBBankSession           // the Game Boy Pokémon Bank (gbbank.go)
 }
 
@@ -108,9 +109,11 @@ func (s *Session) ensureHelper(why string) error {
 		} else if s.cartWhat != "" {
 			which = s.cartWhat
 		}
-		id := s.ui.ShowPrompt(Prompt{Kind: "power", Title: why,
-			Text: "Hold START and SELECT while you switch the GBA on, with " + which +
-				" in it. If it's already on, switch it off first.",
+		text := "Hold START and SELECT while you switch the GBA on, with " + which + " in it. If it's already on, switch it off first."
+		if s.game != nil && s.game.GB { // the helper runs in GBA mode: a Game Boy cartridge would stop that
+			text = "Switch the GBA off and take the Game Boy cartridge out. Then hold START and SELECT while you switch it on."
+		}
+		id := s.ui.ShowPrompt(Prompt{Kind: "power", Title: why, Text: text,
 			Buttons: []Button{{ID: "cancel", Label: "Cancel", Style: "secondary"}}})
 		lang := s.helperLang()
 		err := s.link.Multiboot(helperImageFor(lang), 365*24*time.Hour, func() bool { _, ok := s.ui.Answer(id); return ok || s.stopped.Load() })
@@ -449,15 +452,18 @@ func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 		return p, nil
 	}
 	set := s.app.settings()
-	if set.Controller && !s.game.GB { // a Game Boy game: the GBA is busy being a Game Boy Color
+	// a Game Boy game: the GBA is a controller only when it's running the helper (runGB asks)
+	if set.Controller && (!s.game.GB || s.gbCtl) {
 		b, err := newBridge(s)
 		if err != nil {
 			s.ui.Log("GBA controller unavailable (%v).", err)
 		} else {
 			s.bridge = b
 			log := func(f string, a ...any) { s.ui.Log(f, a...) }
-			override := luaOverride(s.game.ROM, s.game.Code, log)
-			if override == "" {
+			override := ""
+			if s.game.GB {
+				b.gbOnly = true
+			} else if override = luaOverride(s.game.ROM, s.game.Code, log); override == "" {
 				override = foundOverride(s.game.ROM, s.game.Code, log)
 			}
 			b.luaOverride, b.luaTrans = override, luaTranslations(b.lang)
@@ -624,6 +630,7 @@ type Bridge struct {
 	st          statusState
 	modeNow     modeBox
 	letGo       atomic.Bool // a save is being written: buttons let go until they're released
+	gbOnly      bool        // a Game Boy game: the GBA is a controller only (no menu or status screens yet)
 	game        string      // the Pokemon game the mGBA script found ("" = none yet)
 	gameProblem string      // why the script can't read this game
 	noRNG       bool        // the game has no RNG screen (your own builds)
@@ -893,6 +900,9 @@ func (b *Bridge) tryRestart() {
 // catchUpSave writes a save made while the GBA wasn't there to the cart. Called with linkMu held.
 func (b *Bridge) catchUpSave() {
 	s := b.s
+	if s.game != nil && s.game.GB { // a Game Boy save goes to its cartridge when mGBA is closed
+		return
+	}
 	if s.needsPush() {
 		if _, err := s.push(""); err != nil {
 			s.ui.Log("Couldn't write the save to the cartridge just now (%v).", err)

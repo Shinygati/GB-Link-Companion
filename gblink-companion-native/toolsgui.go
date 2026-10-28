@@ -151,6 +151,10 @@ func (w *Window) toolsView() []layout.Widget {
 func (w *Window) gbPlayNote(gtx C) D {
 	return layout.Inset{Top: 14}.Layout(gtx, func(gtx C) D {
 		return w.box(gtx, w.pal.surface2, w.pal.border, 12, 14, func(gtx C) D {
+			if w.st.Controller.Enabled {
+				return w.label(gtx, 13.5, font.Normal, w.pal.text, "This is a Game Boy game, and the GBA is the controller (no status screens for Game Boy games yet). "+
+					"Your in-game saves are kept on this PC; when you close mGBA, you're asked to put the cartridge back in, and they're copied to it and checked.")
+			}
 			return w.label(gtx, 13.5, font.Normal, w.pal.text, "This is a Game Boy game, so the GBA is being a Game Boy Color: it can't be a controller or a second screen. "+
 				"Leave it on with the cartridge in, and each save is copied to the cartridge and checked. If it's switched off, your save waits on this PC.")
 		})

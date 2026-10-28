@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -666,12 +668,23 @@ func (d *bankData) moveName(m int) string {
 	return fmt.Sprintf("Move %d", m)
 }
 
+// gen3ItemsText: PKHeX's list of the Gen 3 items in English (GPL-3.0), by the games' item
+// number: the names when they weren't read from the player's game.
+//
+//go:embed assets/gen3/items_g3_en.txt
+var gen3ItemsText string
+
+var gen3ItemNames = sync.OnceValue(func() []string { return strings.Split(strings.TrimRight(gen3ItemsText, "\n"), "\n") })
+
 func (d *bankData) itemName(i int) string {
 	if i == 0 {
 		return ""
 	}
 	if d != nil && i < len(d.Items) && d.Items[i] != "" {
 		return d.Items[i]
+	}
+	if n := gen3ItemNames(); i < len(n) && n[i] != "" && n[i] != "???" {
+		return n[i]
 	}
 	return fmt.Sprintf("Item %d", i)
 }

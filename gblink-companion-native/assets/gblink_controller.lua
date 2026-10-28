@@ -198,6 +198,11 @@ local function useBuild(v, rev)
 end
 
 local function detect()
+  local okp, plat = pcall(function() return emu:platform() end)
+  if okp and C and C.PLATFORM and plat == C.PLATFORM.GB then -- a Game Boy game: the GBA is a controller only
+    unsupported = "A Game Boy game: the GBA works as a controller only."
+    return
+  end
   local code = ""
   for i = 0, 3 do code = code .. string.char(r8(0x080000AC + i)) end
   local rev = r8(0x080000BC)

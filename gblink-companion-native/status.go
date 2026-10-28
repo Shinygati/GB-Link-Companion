@@ -1278,6 +1278,23 @@ func (b *Bridge) drawStatus(force bool) error {
 // held, with the helper answering. Returns the buttons to pass on to mGBA.
 func (b *Bridge) statusTick(keys int, show bool) int {
 	st := &b.st
+	if b.gbOnly { // a Game Boy game: only a controller for now (no menu, no status screens)
+		if show || st.onGBA != modeController {
+			if b.s.helper.ShowControllerHint(false) == nil {
+				st.onGBA = modeController
+				b.mu.Lock()
+				b.needShow = false
+				b.mu.Unlock()
+			}
+		}
+		if st.suppress {
+			if keys == 0 {
+				st.suppress = false
+			}
+			return 0
+		}
+		return keys & 0xFF // the Game Boy has no L or R
+	}
 	b.countEncounters()
 	if st.unknown {
 		st.unknown = false
