@@ -102,7 +102,7 @@ public final class MainActivity extends Activity {
     void launch(String id){if(!isFinishing())startActivity(new Intent(this,PlayActivity.class).putExtra("id",id));}
     void maybePrompt(){
         if(isFinishing()||hub.busy||showingPrompt||showingFirmware||hub.firmwareOffer||hub.bootloaderOffer)return;
-        try{List<Store.Entry> entries=hub.store.pending();if(entries.isEmpty())return;Store.Entry e=entries.get(0);String key=e.id+e.save+e.interrupted;if(prompted.equals(key))return;prompted=key;pendingMenu(e);}
+        try{List<Store.Entry> entries=hub.store.pending();if(entries.isEmpty())return;Store.Entry e=entries.get(0);String key=e.id+e.save+e.interrupted+hub.ready;if(prompted.equals(key))return;prompted=key;pendingMenu(e);}
         catch(IOException e){Ui.error(this,e);}
     }
     void maybeFirmwarePrompt(){

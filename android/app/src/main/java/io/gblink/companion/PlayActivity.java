@@ -36,9 +36,10 @@ public final class PlayActivity extends Activity {
         if(exiting||engine==null)return;exiting=true;
         try{engine.pauseAndSave();Store.Entry e=hub.store.entry(id);
             if(!e.pending()){finish();return;}
+            final boolean canWrite=hub.ready&&!hub.busy;
             new AlertDialog.Builder(this).setTitle("Write save back to cartridge?")
                 .setMessage(hub.ready?"The latest in-game save is saved on your phone. Write and verify it on the cartridge before returning home?":"GB-Link is disconnected. Your latest in-game save is retained on this phone. Return home, reconnect GB-Link and start the GBA helper to write it back.")
-                .setPositiveButton(hub.ready&&!hub.busy?"Write & exit":"Home · save pending",(d,w)->{if(hub.ready&&!hub.busy)exitSync(null);else finish();})
+                .setPositiveButton(canWrite?"Write & exit":"Home · save pending",(d,w)->{if(canWrite&&hub.ready&&!hub.busy)exitSync(null);else finish();})
                 .setNegativeButton("Exit · keep pending",(d,w)->finish())
                 .setNeutralButton("Keep playing",(d,w)->continueGame()).setOnCancelListener(d->continueGame()).show();
         }catch(IOException e){exiting=false;Ui.error(this,e);}
