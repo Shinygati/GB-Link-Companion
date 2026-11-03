@@ -1,0 +1,6 @@
+[submodule "android/third_party/mgba"]
+	path = android/third_party/mgba
+	url = https://github.com/mgba-emu/mgba.git
+[submodule "android/third_party/gblink-firmware"]
+	path = android/third_party/gblink-firmware
+	url = https://github.com/GB-Link/GBLink-Firmware.git

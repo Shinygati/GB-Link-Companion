@@ -4,6 +4,10 @@ An unofficial companion app for the [GB-Link](https://gblink.io) USB adapter, **
 
 **Current version: 1.5.0.**
 
+## Android port (alpha)
+
+The [`android/`](android/README.md) project embeds mGBA and loads ROMs from phone storage with saves read from and written to the real GBA cartridge over USB OTG / GB-Link. It supports unplugged play, persistent pending saves and exit/home write-back prompts, timestamped save backups, ROM dumping, and a bundled official RP2040 firmware version check / USB BOOTSEL installer. Pokémon status screens are omitted. This alpha does not yet provide full desktop feature parity and still needs real phone/adapter/cartridge validation; see [validation](android/VALIDATION.md) and [build instructions](android/README.md#build).
+
 > **Not affiliated with GB-Link.** GB-Link Companion is an independent, unofficial program. It isn't made, endorsed or supported by the makers of the GB-Link adapter (gblink.io).
 
 ---
