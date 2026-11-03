@@ -14,5 +14,5 @@ with tempfile.TemporaryDirectory(prefix="gblink-test-classes-") as directory:
     ], check=True)
     subprocess.run([
         "java", "-cp", directory, "io.gblink.companion.CoreTests",
-        str(root / "app/src/main/assets/gblink.v2.2.3.uf2"),
+        str(root / "app/src/main/assets/gblink.v2.2.7.uf2"),
     ], check=True)

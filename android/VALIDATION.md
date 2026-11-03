@@ -1,11 +1,11 @@
-# Validation for the 0.1.0 alpha
+# Validation for the 0.1.1 alpha
 
 Completed during this build:
 
 - Android Java/resources compiled against SDK 35, min SDK 26.
 - Native mGBA 0.10.5 plus the JNI frontend/save hook compiled for `arm64-v8a`, `armeabi-v7a` and `x86_64` with NDK r27c; 16 KB ELF load-segment alignment enabled.
 - APK alignment and v2/v3 signing checks passed.
-- **436 deterministic host checks passed** for fragmented USB frames, checksums, six save-chip sizes, pending journal restart, USB loss before/after a save block, wrong cartridges, changed saves, stale conflict confirmation, a newer emulator save during write-back, identical save-event backups, bundled UF2 hash/family/address validation, flash-sector preservation and failed read-back handling.
+- **546 deterministic host checks passed** for fragmented USB frames, checksums, six save-chip sizes, pending journal restart, USB loss before/after a save block, wrong cartridges, changed saves, stale conflict confirmation, a newer emulator save during write-back, identical save-event backups, bundled UF2 hash/family/address validation, flash-sector preservation and failed read-back handling.
 - **10 checks passed against the real mGBA JNI build on Windows**, using the same frontend code and save hook: load cartridge save memory at all six supported sizes, run an original tiny test ROM, render a green frame, read/modify SRAM, preserve the save tail, receive mGBA's `savedataUpdated` event, and unload/reload the core.
 
 The Windows-native smoke test validates the emulator/frontend logic; it is not an Android runtime or USB hardware test. Android emulator startup was attempted but did not produce a usable boot in this environment. No real cartridge, GB-Link adapter, phone, firmware flash or Android UI session was available for end-to-end verification. The alpha remains hardware-unverified.

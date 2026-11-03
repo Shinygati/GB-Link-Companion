@@ -36,7 +36,7 @@ public final class MainActivity extends Activity {
         }body.addView(nav);
         try{pendingCards();if(tab.equals("Games"))games();else if(tab.equals("Cartridge tools"))tools();else settings();}
         catch(IOException e){Ui.error(this,e);}
-        body.addView(Ui.text(this,"Unofficial companion · 0.1.0 alpha\nGBA / GBA SP + GB-Link + GBC link cable + USB OTG",12,Ui.MUTED));
+        body.addView(Ui.text(this,"Unofficial companion · 0.1.1 alpha\nGBA / GBA SP + GB-Link + GBC link cable + USB OTG",12,Ui.MUTED));
     }
     void pendingCards()throws IOException{
         for(Store.Entry e:hub.store.pending()){
@@ -110,7 +110,7 @@ public final class MainActivity extends Activity {
         if(hub.bootloaderOffer){hub.bootloaderOffer=false;firmware();return;}
         if(!hub.firmwareOffer)return;hub.firmwareOffer=false;showingFirmware=true;
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("GB-Link firmware differs")
-            .setMessage("Installed: "+hub.installedFirmware+"\nBundled: "+FirmwareImage.VERSION+" (official stable RP2040 firmware)\n\nInstall the bundled version over USB? A newer installed version would be downgraded. Unknown versions cannot be compared. No firmware is written without your choice.")
+            .setMessage("Installed: "+hub.installedFirmware+"\nBundled: "+FirmwareImage.VERSION+" (official RP2040 prerelease)\n\nInstall the bundled version over USB? A newer installed version would be downgraded. Unknown versions cannot be compared. No firmware is written without your choice.")
             .setPositiveButton("Install…",(d,w)->firmware()).setNegativeButton("Use installed version",(d,w)->hub.continueWithInstalledFirmware()).create();
         dialog.setOnDismissListener(d->showingFirmware=false);dialog.show();
     }

@@ -84,7 +84,7 @@ public final class CoreTests {
         public void reboot(){rebooted=true;}
     }
     static void firmware(String path)throws Exception{
-        byte[] uf2=Files.readAllBytes(Paths.get(path));FirmwareImage image=new FirmwareImage(uf2,FirmwareImage.SHA256);check(image.pages.size()==359,"Pinned official firmware block count");
+        byte[] uf2=Files.readAllBytes(Paths.get(path));FirmwareImage image=new FirmwareImage(uf2,FirmwareImage.SHA256);check(image.pages.size()==469,"Pinned official firmware block count");
         expect(IOException.class,()->new FirmwareImage(uf2,"wrong hash"));
         byte[] bad=uf2.clone();bad[28]^=1;final byte[] wrongFamily=bad;expect(IOException.class,()->new FirmwareImage(wrongFamily,Store.hash(wrongFamily))); // wrong chip family
         bad=uf2.clone();ByteBuffer.wrap(bad).order(ByteOrder.LITTLE_ENDIAN).putInt(12,0x20000000);final byte[] ramImage=bad;expect(IOException.class,()->new FirmwareImage(ramImage,Store.hash(ramImage)));

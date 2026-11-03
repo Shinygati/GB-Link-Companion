@@ -5,8 +5,8 @@ import java.util.*;
 
 /** Strict RP2040 UF2 parser; accepts only the bundled, hashed official image. */
 final class FirmwareImage {
-    static final String VERSION="2.2.3",FILE="gblink.v2.2.3.uf2";
-    static final String SHA256="6600b227795434d202b186835c45bf4e3dfa505711c773a195592ccdf5df2113";
+    static final String VERSION="2.2.7",FILE="gblink.v2.2.7.uf2";
+    static final String SHA256="958458ac70d393f5423706baf6cbe8621a7701ecd6f237b9b8e3c92579f483cd";
     final TreeMap<Integer,byte[]> pages=new TreeMap<>();
     FirmwareImage(byte[] bytes,String expectedHash)throws IOException{
         if(!Store.hash(bytes).equals(expectedHash))throw new IOException("Firmware SHA-256 verification failed");

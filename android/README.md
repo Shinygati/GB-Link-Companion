@@ -1,4 +1,4 @@
-# GB-Link Companion for Android — 0.1.0 alpha
+# GB-Link Companion for Android — 0.1.1 alpha
 
 Android port of [Shinygati/GB-Link-Companion](https://github.com/Shinygati/GB-Link-Companion), based on commit `23638b2a741672db86f02402c54b76e7c57f61a3`. It embeds **mGBA 0.10.5**, rather than launching a separate Android emulator. Original icons and the original GBA helper are reused with attribution.
 
@@ -33,11 +33,11 @@ Each *new* session loads its save from the cartridge. A pending session is never
 
 ## Bundled adapter firmware
 
-The app bundles the unmodified official **GB-Link RP2040 firmware 2.2.3**, the upstream stable release selected for this build:
+The app bundles the unmodified official **GB-Link RP2040 firmware 2.2.7**, the upstream prerelease requested for this build:
 
-- [Release and source](https://github.com/GB-Link/GBLink-Firmware/releases/tag/v2.2.3)
-- UF2 SHA-256: `6600b227795434d202b186835c45bf4e3dfa505711c773a195592ccdf5df2113`
-- Source commit: `4aef46a1aff688cc0a68df666858eccb9b5ae291`
+- [Release and source](https://github.com/GB-Link/GBLink-Firmware/releases/tag/v2.2.7)
+- UF2 SHA-256: `958458ac70d393f5423706baf6cbe8621a7701ecd6f237b9b8e3c92579f483cd`
+- Source commit: `1b49b765c350d2ecd7dd4ed79e5428d9848c7443`
 
 Connection queries firmware command `0x0F`. A different or unknown version prompts **Install** or **Use installed version**. Installing the bundled version may downgrade a newer installed version; the prompt says so. The app does not silently update firmware.
 
