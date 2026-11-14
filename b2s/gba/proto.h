@@ -13,7 +13,7 @@
 #ifndef PROTO_H
 #define PROTO_H
 
-#define B2S_VERSION        0x00010100u            /* 1.1.0: the streamed transfers below */
+#define B2S_VERSION        0x00010101u            /* 1.1.1: 128 KB flash read as 128 KB; 1.1.0: the streamed transfers below */
 
 #define W_POLL             0x504F4C4Cu            /* "POLL" */
 #define W_IDLE             0x49444C45u            /* "IDLE" */

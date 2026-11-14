@@ -26,8 +26,24 @@ const (
 	cmdSetTiming  = 0x30
 	cmdVoltage3V3 = 0x40
 	modeGBLink    = 0x02
-	gblinkVID     = "2FE3"
 )
+
+// The USB IDs the GB-Link firmware shows up with: up to 2.2.x the Zephyr default vendor ID
+// (2FE3, any product ID), from 3.0.0 the pid.codes ID 1209:B011. 1209 is shared by many
+// projects, so it's only matched with GB-Link's product ID.
+var gblinkIDs = []struct{ vid, pid string }{
+	{"2FE3", ""},
+	{"1209", "B011"},
+}
+
+func isGBLinkUSB(vid, pid string) bool {
+	for _, id := range gblinkIDs {
+		if strings.EqualFold(vid, id.vid) && (id.pid == "" || strings.EqualFold(pid, id.pid)) {
+			return true
+		}
+	}
+	return false
+}
 
 // LinkError is a problem talking to the adapter or the GBA, with a message for the player.
 type LinkError struct{ msg string }
@@ -68,7 +84,7 @@ func FindGBLinkPort() string {
 		return ""
 	}
 	for _, p := range ports {
-		if p.IsUSB && strings.EqualFold(p.VID, gblinkVID) {
+		if p.IsUSB && isGBLinkUSB(p.VID, p.PID) {
 			return p.Name
 		}
 	}
@@ -470,6 +486,11 @@ func (h *Helper) Configure() {
 	h.link.SetMode(modeGBLink)
 	time.Sleep(100 * time.Millisecond)
 	h.link.SetTiming(h.gap, 4)
+	// Firmware 3.0.0 restarts the GB Link mode on every SetMode (default timing: 1 byte a
+	// transfer, 1 ms apart) and queues SetTiming behind it; one that arrives while the mode is
+	// still restarting is lost. Send it again: twice is harmless on every firmware.
+	time.Sleep(20 * time.Millisecond)
+	h.link.SetTiming(h.gap, 4)
 	time.Sleep(20 * time.Millisecond)
 	h.link.Drain()
 }
@@ -678,10 +699,11 @@ func (h *Helper) Show(msg int) error {
 }
 
 type CartInfo struct {
-	Type    int
-	FlashID uint32
-	Title   string
-	Code    string
+	Type     int
+	ChipType int // when the chip answered as something smaller than the game's save: what it said
+	FlashID  uint32
+	Title    string
+	Code     string
 }
 
 func (h *Helper) SaveInfo() (CartInfo, error) {
@@ -693,7 +715,11 @@ func (h *Helper) SaveInfo() (CartInfo, error) {
 	for i := 0; i < 4; i++ {
 		binary.LittleEndian.PutUint32(raw[4*i:], d[2+i])
 	}
-	return CartInfo{Type: int(d[0]), FlashID: d[1], Title: printable(raw[:12]), Code: printable(raw[12:16])}, nil
+	info := CartInfo{Type: int(d[0]), FlashID: d[1], Title: printable(raw[:12]), Code: printable(raw[12:16])}
+	if t := chooseSaveType(info.Type, knownSaveType(info.Code)); t != info.Type {
+		info.ChipType, info.Type = info.Type, t // the chip's ID came back wrong: see savesize.go
+	}
+	return info, nil
 }
 
 func printable(b []byte) string {

@@ -47,6 +47,9 @@ type Session struct {
 	gbRAM      int                      // ...the size of its save
 	gbCtl      bool                     // a Game Boy game with the GBA running the helper as its controller
 	gbbank     *GBBankSession           // the Game Boy Pokémon Bank (gbbank.go)
+	settle     saveSettle               // whether mGBA has finished writing its save (savesettle.go)
+	romType    int                      // the save type the ROM is for (savesize.go; 0: it doesn't say)
+	romRead    bool                     // ...and it's been looked up
 }
 
 // helperLang: the language for the GBA's text: the Pokémon game's (lang.go), else English
@@ -159,8 +162,20 @@ func (s *Session) checkCart() (CartInfo, error) {
 		return info, linkErr("The cartridge in the GBA is %s [%s], but the game you picked is %s [%s]. Put the right cartridge in.",
 			info.Title, info.Code, s.game.Title, s.game.Code)
 	}
+	chip := info.Type
+	if info.ChipType != 0 {
+		chip = info.ChipType
+	}
+	t := chooseSaveType(info.Type, s.romSave())
+	if t != chip {
+		s.ui.Log("The cartridge's save chip answered as %s, but this game's save is %s: using %s.",
+			saveTypes[chip].Name, saveTypes[t].Name, saveTypes[t].Name)
+	}
 	if s.saveType == 0 {
-		s.saveType = info.Type
+		s.saveType = t
+	} else if s.saveType != t && chooseSaveType(s.saveType, t) == t { // noted too small before
+		s.saveType = t
+		s.cart = nil
 	}
 	return info, nil
 }
@@ -175,8 +190,7 @@ func (s *Session) pull() error {
 		return err
 	}
 	s.ui.Log("Cart: %s [%s], save chip: %s.", info.Title, info.Code, saveTypes[s.saveType].Name)
-	data, err := s.helper.ReadSave(s.saveType, func(d, t int) { s.ui.SetProgress("Loading your save from the cartridge", d, t) })
-	s.ui.ClearProgress()
+	data, err := s.readSaveChecked()
 	if err != nil {
 		return err
 	}
@@ -222,6 +236,12 @@ func (s *Session) push(why string) (bool, error) {
 		return false, linkErr("%s is %d bytes, but the cartridge's save is %d bytes.", filepath.Base(s.game.Sav), len(data), st.Size)
 	}
 	data = data[:st.Size]
+	// While mGBA runs (why == ""), only a save it has finished writing goes to the cart: one caught
+	// half way would leave the cart with a half-written save (savesettle.go). The watcher copies
+	// it once it's done.
+	if why == "" && !s.settle.quiet(data, time.Now()) {
+		return true, nil
+	}
 	if s.bridge != nil { // the GBA stops answering while it saves: let go of any buttons in mGBA
 		s.bridge.letGoKeys()
 	}
@@ -244,7 +264,10 @@ func (s *Session) push(why string) (bool, error) {
 	s.state.Pending = true
 	s.game.saveState(s.state)
 	s.ui.SetWriting(true)
-	n, err := s.helper.WriteSave(s.saveType, data, s.cart, func(d, t int) { s.ui.SetProgress("Saving to the cartridge", d, t) })
+	// The whole save is written every time, not only the blocks that differ from what was last
+	// written: if the cart doesn't hold what we think it does, writing only the changes leaves it
+	// with half a save (the game then loads the one before).
+	n, err := s.helper.WriteSave(s.saveType, data, nil, func(d, t int) { s.ui.SetProgress("Saving to the cartridge", d, t) })
 	s.ui.ClearProgress()
 	if err == nil {
 		s.cart = data
@@ -256,7 +279,7 @@ func (s *Session) push(why string) (bool, error) {
 		return false, err
 	}
 	if n > 0 {
-		s.ui.Log("Save written to the cart and verified (%d of %d blocks changed).", n, max(1, st.Size/saveChunk))
+		s.ui.Log("Save written to the cart and verified (all %d blocks).", n)
 	}
 	s.ui.SetCart("synced", "The cartridge has your latest save.")
 	if s.bridge != nil {
@@ -309,6 +332,7 @@ func (s *Session) run() {
 	g := s.game
 	s.state = g.loadState()
 	s.saveType = s.state.SaveType
+	s.fixSaveType()
 	s.ui.SetPhase("connect")
 	s.ui.SetStatus("Connecting to the GB-Link...", "busy")
 	for {
@@ -503,10 +527,9 @@ func (s *Session) startMGBA(mgba string) (*mgbaProc, error) {
 	return p, nil
 }
 
-// watch keeps the cart in step while mGBA runs.
+// watch keeps the cart in step while mGBA runs. It goes by what's in the .sav, not by its modified
+// time: mGBA writes into the file as the game saves, and the time doesn't follow (savesettle.go).
 func (s *Session) watch(p *mgbaProc) {
-	var lastSig string
-	var stableSince time.Time
 	warned := false
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
@@ -516,19 +539,13 @@ func (s *Session) watch(p *mgbaProc) {
 			return
 		case <-tick.C:
 		}
-		st, err := os.Stat(s.game.Sav)
-		if err != nil {
+		data := s.game.localSave()
+		if data == nil {
 			continue
 		}
-		sig := fmt.Sprint(st.ModTime().UnixNano(), st.Size())
-		if sig != lastSig {
-			lastSig, stableSince = sig, time.Now()
+		if settled, first := s.settle.observe(s.savePart(data), time.Now()); !settled || !first {
 			continue
 		}
-		if stableSince.IsZero() || time.Since(stableSince) < 1500*time.Millisecond {
-			continue
-		}
-		stableSince = time.Time{}
 		s.linkMu.Lock()
 		if !s.needsPush() {
 			s.linkMu.Unlock()

@@ -2,9 +2,18 @@
 
 An unofficial companion app for the [GB-Link](https://gblink.io) USB adapter, **created by Shinygati**. You play your Game Boy Advance, Game Boy and Game Boy Color games in **mGBA** on your PC with the **save from your real cartridge**. With a GBA game your **GBA** works as the controller, and in the Pokémon games (Ruby, Sapphire, Emerald, FireRed and LeafGreen) it can also be a second screen showing live game info. It also backs up cartridges, writes saves back to them, writes games to flash carts, and has a Pokémon Bank for the GBA games and a separate one for the Game Boy games.
 
-**Current version: 1.5.0.**
+**Current version: 1.6.0.**
 
 > **Not affiliated with GB-Link.** GB-Link Companion is an independent, unofficial program. It isn't made, endorsed or supported by the makers of the GB-Link adapter (gblink.io).
+
+---
+
+## What's new in 1.6.0
+
+- **GB-Link firmware 3.0.0**: the app finds adapters running the new firmware (its new USB ID) as well as older ones.
+- **Fixed: every second save loading as corrupted** in Pokémon Ruby, Sapphire, Emerald, FireRed and LeafGreen (in mGBA and in the backups). Their 128 KB save is now always read and written whole, and a save read from the cartridge that comes back with half a save slot is read again.
+- **The whole save goes to the cartridge** each time it syncs, not only the parts that changed.
+- **In-game saves are copied once mGBA has finished writing them**, never half way through.
 
 ---
 

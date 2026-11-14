@@ -298,7 +298,8 @@ func (g *gbaWC) reconnect() bool {
 		case <-time.After(2 * time.Second):
 		}
 		if s.connect() == nil {
-			s.link.SetMode(modeGBLink) // a freshly plugged-in adapter starts in its default mode
+			s.link.SetMode(modeGBLink)         // a freshly plugged-in adapter starts in its default mode
+			time.Sleep(100 * time.Millisecond) // firmware 3.0.0: the mode restarts first, or the timing is lost
 			s.link.SetTiming(wcGBAGap, 4)
 			g.setState("away")
 			return true

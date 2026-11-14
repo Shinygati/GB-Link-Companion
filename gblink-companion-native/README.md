@@ -2,7 +2,7 @@
 
 > **Not affiliated with GB-Link.** GB-Link Companion is an independent, unofficial program. It is not made, endorsed or supported by the makers of the GB-Link adapter ([gblink.io](https://gblink.io)).
 
-*Created by Shinygati. Version 1.5.0.*
+*Created by Shinygati. Version 1.6.0.*
 
 Play your GBA, Game Boy and Game Boy Color games in **mGBA** with the **save from your real cartridge**, using a [GB-Link](https://gblink.io) adapter. Pick a game, press **Play**, and the app does the rest:
 
@@ -255,7 +255,7 @@ The version is shown beside the name at the top of the window. When the app star
 
 ## On Linux
 
-Run `GBLinkCompanion-1.5.0-x86_64.AppImage` (make it executable first: `chmod +x`, or tick "Allow
+Run `GBLinkCompanion-1.6.0-x86_64.AppImage` (make it executable first: `chmod +x`, or tick "Allow
 executing" in its properties). It works on any desktop Linux from about 2018 on (glibc 2.28 or newer).
 
 - **mGBA** is found by itself if it's installed from your distribution (`mgba-qt`), as an AppImage

@@ -97,8 +97,10 @@ static void flash_bank(u32 offset, u32 type)
     if (type != SAVE_FLASH128) return;
     u8 bank = (u8)(offset >> 16);
     if (bank == cur_bank) return;
+    fcmd(0xF0);                 /* make sure the chip is back in read mode first */
     fcmd(0xB0);
     save_wr(0, bank);
+    delay_loop(200);            /* let the bank latch settle before the first read */
     cur_bank = bank;
 }
 
@@ -174,11 +176,18 @@ u32 save_detect(u32 *flashIdOut)
     REG_WAITCNT = (REG_WAITCNT & ~3u) | 3u;   /* slowest SRAM timing: works with every chip */
 #endif
     cur_bank = 0xFF;
-    flash_id = flash_read_id();
+    flash_id = 0;
+    for (int tries = 0; tries < 3 && !flash_id; tries++) flash_id = flash_read_id();
     *flashIdOut = flash_id;
-    if (flash_id) return flash_is_128k(flash_id) ? SAVE_FLASH128 : SAVE_FLASH64;
 
     u32 words = rom_words_guess();
+    if (flash_id) {
+        /* The game's save library names its save: a 128 KB flash game's chip is never taken for a
+         * 64 KB one, even if its ID reads as something else (only half the save would be copied). */
+        if (flash_is_128k(flash_id) || rom_has("FLASH1M_V", 9, words)) return SAVE_FLASH128;
+        return SAVE_FLASH64;
+    }
+
     if (rom_has("EEPROM_V", 8, words)) {
         /* 512 B or 8 KB? Read in 8 KB mode (14-bit addresses): a 512 B chip gives the same 8 bytes
          * for every block, an 8 KB chip doesn't (same check as GB-Link Cart Doctor). */
@@ -206,7 +215,10 @@ int save_read(u32 type, u32 offset, u32 nbytes, u8 *out)
         for (u32 i = 0; i < nbytes; i += 8) eeprom_read8((offset + i) >> 3, abits, out + i);
         return 0;
     }
-    if (type == SAVE_FLASH128) { cur_bank = 0xFF; }
+    if (type == SAVE_FLASH64 || type == SAVE_FLASH128) {
+        cur_bank = 0xFF;
+        fcmd(0xF0);             /* read mode, whatever the chip was last left in */
+    }
     for (u32 i = 0; i < nbytes; i++) {
         u32 a = offset + i;
         if (type == SAVE_FLASH128) flash_bank(a, type);
